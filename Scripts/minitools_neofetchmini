@@ -1,0 +1,85 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+clear -x
+#writen by dberistain
+#Defining some colors =========================
+source ~/.bashrc
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+#Defining bar spacers parameters ==============
+masterWidth="80";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+
+#checks if the device has ECC RAM
+ #============================================================================
+             ECC_RAM() {
+                 RAM_None="$(dmidecode -t 16 |grep -m 1 "Correction Type" |grep -o None)"
+                 RAM_Type="$(dmidecode -t 16 |grep -m 1 "Correction Type" |cut -d " " -f 2-5)"
+
+                     if [ "$RAM_None" = "None" ]
+                         then
+                             isECC="NON-ECC Memory"
+
+                     elif [ ! -z "$RAM_Type" ] && [ -z "$RAM_None" ]
+                         then
+                             isECC="ECC Memory" 
+
+                     else isECC=""
+             fi
+         }
+         ECC_RAM
+
+
+# Display header
+center "$yellow$bold""Proudly Using Linux$r"
+
+# Display system information
+echo
+echo "$yellow$bold""  System Information$r"
+echo $bbar
+echo "$bold""Hostname :"$r" $(hostname)"
+echo "$bold""OS       :"$r" $(lsb_release -d | awk -F ':\t' '{print $2}')"
+echo "$bold""Kernel   :"$r" $(uname -r)"
+echo "$bold""Uptime   :"$r" $(uptime | awk '{print $3}')"
+echo "$bold""CPU      :"$r" $(lscpu | grep 'Model name' | awk -F ':' '{print $2}' | xargs)"
+echo "$bold""Memory   :"$r" $(free -m | grep 'Mem' | awk '{print $2}') MB | $isECC | [] $(bc <<< "scale=2; $(free -m | grep 'Mem' | awk '{print $3}')/$(free -m | grep 'Mem' | awk '{print $2}') * 100")%"
+echo "$bold""Disk     :"$r" $(df -h / | awk 'NR==2{print $3}') used out of $(df -h / | awk 'NR==2{print $2}')  [] $(bc <<< "scale=2; $(df -h / | awk 'NR==2{print $3}' | sed 's/G//')/$(df -h / | awk 'NR==2{print $2}' | sed 's/G//') * 100")%"
+echo 
+echo 
+# Display network information
+echo "$yellow$bold""Network Information "$r""
+echo $bbar
+echo "$bold""Public IP     :"$r" $(curl -s icanhazip.com)"
+echo "$bold""Gateway       :"$r" $(ip route | awk '/default/ {print $3}')"
+echo ""
+echo "$yellow$bold""Network interfaces (Physical and VPN)$r"
+ip -o addr show | awk '$2 !~ /lo|docker|br-/ {print $2, $4}' | sed 's/\/[0-9]*//'
+echo $bbar
+

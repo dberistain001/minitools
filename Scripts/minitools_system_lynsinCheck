@@ -1,0 +1,16 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+mkdir /tmp/lynisCheck
+cd /tmp/lynisCheck
+wget https://github.com/CISOfy/lynis/archive/refs/heads/master.zip
+apt update
+apt install zip -y 
+unzip ./master.zip
+cd lynis-master/
+clear -x 
+./lynis audit system
+rm /tmp/lynisCheck/ -r
+
+#Special Thanks to CISOfy/lynis the creator of the script, this is just a tool to quickly download it 
+

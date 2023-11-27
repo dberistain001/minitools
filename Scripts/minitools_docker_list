@@ -1,0 +1,91 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+
+#Defining some colors =========================
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+
+#Defining bar spacers parameters ==============
+masterWidth="148";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+flag=$1
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+
+
+#starting Script
+#------------------------------------------------------------------------#
+activeContainers=$(docker ps -a -q|awk {'print $1'}|grep -v "CONTAINER");
+#function to get and print the restart policy
+        restartPolicy() {
+                restartPolicy=$(docker container inspect $container |grep -A 1 RestartPolicy|grep Name|awk {'print $2'}|tr -d '",')
+                echo $restartPolicy
+        }
+
+#function to get the container name 
+        ContainerName() {
+                ContainerName=$(docker container inspect $container |grep -m 1 Name|awk {'print $2'}|tr -d '",/')
+                echo $ContainerName
+        }
+
+#function to get status
+        containerStatus() {
+        containerStatus=$(docker container inspect $container|grep -m 1 Status|tr -d '",'|awk {'print $2'})
+
+        #set a color depending on status
+        if [[ "$containerStatus" == "running" ]];then statusColor="$green";
+        else stausColor="$yellow"
+        fi
+
+        echo  $stausColor$containerStatus
+        }
+
+#function to get status and uptime
+        containerUptime() {
+        ContainerStartTime=$(docker container inspect $container|grep Started|tr -d '",'|awk {'print $2'})
+        containerUptime=$(date -d $ContainerStartTime +'%x on %X')
+        echo $containerUptime 
+        }
+
+#function to get image name 
+                                containerImage() {
+                                containerImageName=$(docker container inspect $container|grep Image |grep -v sha256|awk {'print $2'}|tr -d '",')
+        echo $containerImageName
+                                }
+
+#Print a table
+echo;echo $blue$bbar$r
+echo  " #  |         Container Name          |          Container Base Image        | Container ID  | Restart Policy  |    Last Restart date      | Status"
+echo $blue$bbar$r
+
+for container in $activeContainers
+        do containerNum=$(( $containerNum + 1 )) 
+           printf ' %-8s | %-38s| %-43s| %-20s| %-22s| %-32s| %-3s' "$(echo $containerNum)$r"   "$(ContainerName)$r"  "$(containerImage)$r" "$container$r"   "$(restartPolicy)$r"     "$(containerUptime)$r"    "$(containerStatus)$r";echo
+done
+
+center;echo

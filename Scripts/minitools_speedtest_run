@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+wget -O  speedtest.py https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py
+clear -x 
+echo "========================================================="
+echo "       Using the script from speedtest on github, "
+echo "========================================================="
+python3 ./speedtest.py
+rm ./speedtest.py 
+echo "========================================================="
+echo 
+
+#Special Thanks to sivel the creator of the script, this is just a tool to quickly download it 
+#https://github.com/sivel
