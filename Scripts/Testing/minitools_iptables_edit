@@ -1,0 +1,99 @@
+#!/bin/bash
+
+clear
+echo "==========================================="
+echo "   Welcome to minitool for IPtables"
+echo "==========================================="
+
+while true; do
+    echo "Options:"
+    echo "1. Allowing Loopback Connections"
+    echo "2. Opening/Closing a Port for All"
+    echo "3. Opening/Closing a Port for a Specific IP or IP Range"
+    echo "4. List Existing Rules"
+    echo "5. Blocking/Unblocking an IP Address"
+    echo "6. Exit"
+
+    read -p "What would you like to do? Select by number: " choice
+
+    case $choice in
+        1)
+            # Allowing Loopback Connections
+            sudo iptables -A INPUT -i lo -j ACCEPT
+            sudo iptables -A OUTPUT -o lo -j ACCEPT
+            echo "Loopback connections allowed."
+            read -p "Press Enter to continue..."
+            clear
+            ;;
+        2)
+            # Opening/Closing a Port for All
+            read -p "Enter the port to open/close: " port
+            read -p "Enter 'open' to open the port or 'close' to close it: " action
+
+            if [ "$action" == "open" ]; then
+                sudo iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+                echo "Port $port is open for all."
+            elif [ "$action" == "close" ]; then
+                sudo iptables -A INPUT -p tcp --dport "$port" -j DROP
+                echo "Port $port is closed for all."
+            else
+                echo "Invalid action. Please enter 'open' or 'close'."
+            fi
+
+            read -p "Press Enter to continue..."
+            clear
+            ;;
+        3)
+            # Opening/Closing a Port for a Specific IP or IP Range
+            read -p "Enter the port to open/close: " port
+            read -p "Enter 'open' to open the port or 'close' to close it: " action
+            read -p "Enter the IP address or range (e.g., 192.168.1.0/24): " ip_range
+
+            if [ "$action" == "open" ]; then
+                sudo iptables -A INPUT -p tcp --dport "$port" -s "$ip_range" -j ACCEPT
+                echo "Port $port is open for $ip_range."
+            elif [ "$action" == "close" ]; then
+                sudo iptables -A INPUT -p tcp --dport "$port" -s "$ip_range" -j DROP
+                echo "Port $port is closed for $ip_range."
+            else
+                echo "Invalid action. Please enter 'open' or 'close'."
+            fi
+
+            read -p "Press Enter to continue..."
+            clear
+            ;;
+        4)
+            # List Existing Rules
+            echo "Existing IPtables rules:"
+            sudo iptables -L -n -v --line-numbers
+            read -p "Press Enter to continue..."
+            clear
+            ;;
+        5)
+            # Blocking/Unblocking an IP Address
+            read -p "Enter the IP address to block/unblock: " block_ip
+            read -p "Enter 'block' to block the IP or 'unblock' to unblock it: " action
+
+            if [ "$action" == "block" ]; then
+                sudo iptables -A INPUT -s "$block_ip" -j DROP
+                echo "Blocked IP address: $block_ip"
+            elif [ "$action" == "unblock" ]; then
+                sudo iptables -D INPUT -s "$block_ip" -j DROP
+                echo "Unblocked IP address: $block_ip"
+            else
+                echo "Invalid action. Please enter 'block' or 'unblock'."
+            fi
+
+            read -p "Press Enter to continue..."
+            clear
+            ;;
+        6)
+            # Exit the script
+            echo "Exiting the IPtables management tool."
+            exit 0
+            ;;
+        *)
+            echo "Invalid option. Please select a valid option."
+            ;;
+    esac
+done

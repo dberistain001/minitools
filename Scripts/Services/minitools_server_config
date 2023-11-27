@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# Define the file path and conditions
+config_file="/homePool/home/docker/filebrowser.cloud.beristain.me/data/files/config_srv/config.local"
+log_file="/homePool/home/docker/filebrowser.cloud.beristain.me/data/files/config_srv/config.log"
+
+
+
+configureRemoteSSHService() {
+# Read the config file and search for the "remote" line
+result=$(grep "remote" "$config_file" | awk -F'=' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+
+# Check the status of the SSH service
+ssh_status=$(systemctl is-active ssh)
+
+if [ "$result" == "true" ] && [ "$ssh_status" != "active" ]; then
+  # "remote = true" is found, and SSH is not active, start the SSH server service
+  echo "Starting the SSH server service."
+  systemctl start ssh
+elif [ "$result" == "false" ] && [ "$ssh_status" == "active" ]; then
+  # "remote = false" is found, and SSH is active, stop the SSH server service
+  echo "Stopping the SSH server service."
+  systemctl stop ssh
+elif [ "$ssh_status" == "active" ]; then
+  # SSH service is already running
+  echo "SSH server service is already running."
+elif [ "$ssh_status" == "inactive" ]; then
+  # SSH service is already stopped
+  echo "SSH server service is already stopped."
+else
+  # Neither "remote = true" nor "remote = false" is found
+  echo "No valid configuration found for 'remote' in the config file."
+fi
+
+}
+
+
+
+
+configureWireguardVPNService() {
+# Read the config file and search for the "wireguard" line
+resultVPN=$(grep "wireguard" "$config_file" | awk -F'=' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+
+# Check the status of the SSH service
+if [ "$resultVPN" == "true" ]
+ then echo "Starting the VPN server ports."
+  ufw allow 50505
+  ufw reload 
+
+elif [ "$resultVPN" == "false" ] 
+ then echo "Stopping the VPN server ports"
+  ufw deny 50505
+  ufw reload 
+
+else
+  # Neither 
+  echo "No valid configuration found for 'wireguard' in the config file."
+fi
+
+}
+
+
+
+
+clear_log_file() {
+
+  # Check if the log file exists
+  if [ -f "$log_file" ]; then
+    # Count the number of lines in the log file
+    line_count=$(wc -l < "$log_file")
+
+    # Calculate the number of lines to keep (6000)
+    lines_to_keep=480
+
+    # If the log file has more lines than the limit, trim it
+    if [ "$line_count" -gt "$lines_to_keep" ]; then
+      lines_to_delete=$((line_count - lines_to_keep))
+      # Remove the excess lines from the top of the file
+      tail -n "$lines_to_delete" "$log_file" > "$log_file.tmp"
+      mv "$log_file.tmp" "$log_file"
+      echo "Log file trimmed. Kept the last $lines_to_keep lines."
+    else
+      echo "Log file already within limit. No trimming needed."
+    fi
+  else
+    echo "Log file '$log_file' not found."
+  fi
+}
+
+
+
+
+
+
+#Configure Checks to run 
+main() {
+configureRemoteSSHService
+#not working VPN port blocks VPN still gets through some how 
+#configureWireguardVPNService
+clear_log_file
+}
+
+
+date >> $log_file
+main >> $log_file
+echo >> $log_file

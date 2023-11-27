@@ -1,0 +1,124 @@
+#!/bin/bash
+#by dberistain >> https://github.com/dberistain001
+
+#lets define some colors 
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+
+
+gatherInfo() {
+# Get the current session 
+currentSSHParentID=$(pstree -p |grep ssh |grep grep|grep -oP '\d+'|head -n 1)
+
+# Get the list of active SSH sessions using pstree without the current session 
+otherSSHSessions=$(pstree -p |grep ssh |grep -v 870020|awk -F'[()]' '{print $2}')
+
+#get all active sessions including the current one 
+currentActiveSessions=$(pstree -p |grep ssh |wc -l)
+
+}
+
+
+pstreeCheck() {
+# Check if pstree is available, and if not, try to install it
+if ! command -v pstree &> /dev/null; then
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update
+        sudo apt-get install psmisc
+    elif command -v yum &> /dev/null; then
+        sudo yum install psmisc
+    else
+        echo "Error: Unable to install pstree. Please install it manually."
+        exit 1
+    fi
+fi
+}
+
+
+
+
+
+killSessions() {
+# Loop through each TTY session and kill it (except the current one)
+for session in $otherSSHSessions; do
+    if [ "$session" != "$currentSSHParentID" ]; then
+        sudo kill "$session"
+        echo "$red""Killed SSH parent session proccess: $session$r"
+    fi
+done
+echo
+
+#check if all sessions were removed, will gather data again to verify
+gatherInfo
+
+if [ "$currentActiveSessions" = "1" ]
+    then echo "Completed Successfully, current parent sessions = $currentActiveSessions";
+    echo "====================================================================================="
+    pstree -p |grep ssh
+    echo "====================================================================================="
+
+
+else 
+    echo "Somenthing went wrong, some sessions could not be terminated"
+    echo "current parent sessions = $currentActiveSessions"
+    echo "Please clean up manually"
+    echo "====================================================================================="
+    pstree -p |grep ssh
+    echo "====================================================================================="
+
+fi 
+
+}
+
+
+#quickCheck for no additional sessions to clean up 
+nothing2clean() {
+
+    if [ "$currentActiveSessions" = "1" ] 
+        then echo "$bold$green""Nothing to clean, there is only one SSH parent session$r"
+             pstree -p |grep ssh
+             exit 0
+    fi
+
+}
+
+
+
+main() {
+#check if pstree is installed 
+pstreeCheck
+
+#gather info 
+gatherInfo
+
+#quickCheck for no additional sessions to clean up, will kill the script if there is nothing to do
+nothing2clean
+
+
+#echo main menu/start script with an user prompt before removing the sessions
+echo "Current Active Sessions"
+    echo "====================================================================================="
+    pstree -p |grep ssh
+    echo "====================================================================================="
+    echo
+
+read -p "$bold""Do you want to remove these sessions? (Y/N): $r" confirm
+
+if [ "$confirm" == "Y" ] || [ "$confirm" == "y" ]; 
+    then killSessions
+else 
+    echo "$yellow""Sure, No sessions were removed!$r"
+fi
+
+}
+
+
+
+main
+

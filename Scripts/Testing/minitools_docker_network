@@ -1,0 +1,2 @@
+docker ps -a -q | xargs -I {} docker inspect -f '{{.Id}} {{.Name}} {{range $net, $netconf := .NetworkSettings.Networks}}{{$net}} {{$netconf.IPAddress}} {{end}}' {} | awk '{print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5}'
+

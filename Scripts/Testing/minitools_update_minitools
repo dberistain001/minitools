@@ -1,0 +1,90 @@
+user="minitools"
+Server="go.beristain.me"
+key="=l^*=a$+f*1AKWLmKimKSErLXt)AE9G6"
+
+
+#clear the screen 
+clear -x
+
+#dowload the minitools updated folder
+echo "================================================================="
+echo "  Downloading the latest availible minitools from $Server"
+echo "================================================================="
+
+#clenup update folder 
+sshpass -p $key ssh -p 9022 -o StrictHostKeyChecking=no $user@$Server 'rm /home/minitools/update/*'
+#update it
+sshpass -p $key ssh -p 9022 -o StrictHostKeyChecking=no $user@$Server 'cp /home/minitools/.bin/minitools* /home/minitools/update/'
+
+
+#mk a tmp folder on the current device and download the files from the updated folder 
+mkdir /tmp/minitools_update
+
+#download the update files and kill the proccess if it fails to download, this way the clean up will not be executed as it may remove existing minitools
+echo "Downloading Update"
+if sshpass -p $key scp -P 9022 -o StrictHostKeyChecking=no $user@$Server:/home/minitools/update/* /tmp/minitools_update/
+then echo " * completed!"
+else echo " ! error downloading minitools update"
+        exit 1
+fi
+
+
+echo "Updating the following commands"
+echo
+ls -1 /tmp/minitools_update/
+echo
+echo "---------------------------------------------"
+echo
+
+
+#Cleaning old minitools files, 
+echo Cleaning old minitools files, 
+mkdir /tmp/old_minitools 2>/dev/null
+
+if mv /usr/bin/minitools_* /tmp/old_minitools
+then echo " * completed!"
+else echo " ! error cleaning old minitools install" 
+	exit 1
+fi
+echo "---------------------------------------------"
+echo
+
+
+#updating minittols scripts in /usr/bin
+echo "Updating minittols scripts in /usr/bin"
+
+if mv /tmp/minitools_update/minitools_* /usr/bin/
+then echo " * Update completed succesfully"
+else echo " ! Failed to complete update"
+     exit 1
+fi
+echo "---------------------------------------------"
+echo
+
+
+#updating new scripts permissions on this system, to allow execution 
+echo "Updating new scripts execution permissions on this system"
+
+if chmod +x /usr/bin/minitools_*
+then echo " * Done"
+else echo " ! Failed to update permissions you may need to call the scripts manually with bash scriptname.sh"
+fi
+echo "---------------------------------------------"
+echo
+
+
+
+
+#cleaning up temp files 
+echo "cleaning up temp files "
+if rm /tmp/minitools_update -r 
+then echo " * Done"
+else echo " ! Failed to clean tmp files, please clean up manually"
+     echo "tmp folder is located in /tmp/minitools_update/"
+fi
+echo
+
+
+echo "================================================================="
+echo "                DONE"
+echo "================================================================="
