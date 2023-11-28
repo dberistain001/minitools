@@ -42,6 +42,11 @@ center() {
 clear -x;echo
 
 #==========================================================================
+#Dependencies checker 
+dependencies="pdbedit smbpasswd"
+minitools_dependencies_checker $dependencies
+
+
 
 listUsers() {
   center "Samba Users"

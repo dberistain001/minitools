@@ -41,6 +41,13 @@ center() {
 
 clear -x;echo
 
+
+#Dependencies checker 
+dependencies="sed"
+minitools_dependencies_checker $dependencies
+
+
+
 # Function to extract share names from the Samba config file (excluding defaults)
 get_share_names() {
     grep -E '^\[.+\]' "$smb_config" | sed 's/\[//;s/\]//' | grep -vE '^(global|homes|printers|print\$)'

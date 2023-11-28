@@ -50,6 +50,13 @@ echo "       Downloading the latest availible minitools from github.com/dberista
 echo "                                   "$green"DOWNLOAD ONLY $r       "
 echo "================================================================================================="
 
+
+#Dependencies checker 
+dependencies="curl"
+minitools_dependencies_checker $dependencies
+
+
+
 #clean old files 
 rm $downloadFolder -r
 
@@ -77,7 +84,7 @@ echo "---------------------------------------------"
 echo
 
 
-echo "The following scripts are now availible in $downloadFolder"
+echo "The following scripts are now availible in $downloadFolder/minitools-main/Scripts"
 echo "You can call then using bash NAME or ./NAME"
 echo
 ls -1 $downloadFolder/minitools-main/Scripts

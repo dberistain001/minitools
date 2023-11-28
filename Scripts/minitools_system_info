@@ -36,6 +36,11 @@ center() {
   echo "$blue$bbar$r"
 }
 
+#Dependencies checker 
+dependencies="dmidecode lsb_release ip curl bc awk sed"
+minitools_dependencies_checker $dependencies
+
+
 
 #checks if the device has ECC RAM
  #============================================================================
@@ -58,7 +63,7 @@ center() {
 
 
 # Display header
-center "$yellow$bold""Proudly Using Linux$r"
+center "$yellow$bold""        Proudly Using Linux$r"
 
 # Display system information
 echo
@@ -67,7 +72,7 @@ echo $bbar
 echo "$bold""Hostname :"$r" $(hostname)"
 echo "$bold""OS       :"$r" $(lsb_release -d | awk -F ':\t' '{print $2}')"
 echo "$bold""Kernel   :"$r" $(uname -r)"
-echo "$bold""Uptime   :"$r" $(uptime | awk '{print $3}')"
+echo "$bold""Uptime   :"$r" $(uptime -p)"
 echo "$bold""CPU      :"$r" $(lscpu | grep 'Model name' | awk -F ':' '{print $2}' | xargs)"
 echo "$bold""Memory   :"$r" $(free -m | grep 'Mem' | awk '{print $2}') MB | $isECC | [] $(bc <<< "scale=2; $(free -m | grep 'Mem' | awk '{print $3}')/$(free -m | grep 'Mem' | awk '{print $2}') * 100")%"
 echo "$bold""Disk     :"$r" $(df -h / | awk 'NR==2{print $3}') used out of $(df -h / | awk 'NR==2{print $2}')  [] $(bc <<< "scale=2; $(df -h / | awk 'NR==2{print $3}' | sed 's/G//')/$(df -h / | awk 'NR==2{print $2}' | sed 's/G//') * 100")%"

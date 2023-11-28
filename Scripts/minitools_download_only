@@ -40,6 +40,10 @@ center() {
   echo "$blue$bbar$r"
 }
 
+#dependencies check
+dependencies="curl"
+minitools_dependencies_checker $dependencies
+
 
 #clear the screen
 clear -x
@@ -49,6 +53,9 @@ echo "==========================================================================
 echo "       Downloading the latest availible minitools from github.com/dberistain001/minitools        "
 echo "                                   "$green"DOWNLOAD ONLY $r       "
 echo "================================================================================================="
+
+
+
 
 #clean old files 
 rm $downloadFolder -r

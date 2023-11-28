@@ -39,6 +39,11 @@ center() {
 }
 
 
+#Dependencies checker 
+dependencies="curl"
+minitools_dependencies_checker $dependencies
+
+
 #clear the screen
 clear -x
 
@@ -66,7 +71,7 @@ echo
 echo "================================================================="
 echo "                              DONE"
 echo "================================================================="
-echo "                    $green Minitools was removed! "
+echo "                    $green Minitools was removed! $r"
 echo "================================================================="
 
 

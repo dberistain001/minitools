@@ -1,6 +1,11 @@
 #!/usr/bin/bash
 #writen by dberistain
 
+#Dependencies checker 
+dependencies="wget"
+minitools_dependencies_checker $dependencies
+
+
 mkdir /tmp/lynisCheck
 cd /tmp/lynisCheck
 wget https://github.com/CISOfy/lynis/archive/refs/heads/master.zip

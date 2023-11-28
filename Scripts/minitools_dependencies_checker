@@ -1,9 +1,5 @@
-#!/usr/bin/bash
+#!/bin/bash
 #writen by dberistain
-
-
-# Define the main Samba configuration file
-smb_config="/etc/samba/smb.conf"
 
 #Defining some colors =========================
 red="$(tput setaf 196)";
@@ -18,7 +14,7 @@ blink="$(tput blink)";
 
 
 #Defining bar spacers parameters ==============
-masterWidth="80";
+masterWidth="148";
 bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
 pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
 flag=$1
@@ -39,25 +35,22 @@ center() {
   echo "$blue$bbar$r"
 }
 
-clear -x;echo
+depCheck() {
+    dependencies_missing_count=0
 
-#==========================================================================
+    for dependency in "$@"; do
+        if ! command -v "$dependency" &>/dev/null; then
+            echo "$dependency is not installed."
+            dependencies_missing_count=$((dependencies_missing_count + 1))
+        fi
+    done
 
-#Dependencies checker 
-dependencies="pdbedit smbpasswd"
-minitools_dependencies_checker $dependencies
-
-
-
-listUsers() {
-  center "Samba Users"
-  pdbedit -L -v | grep -e Unix -e Directory -e "---------------"
-  echo
+    if [ "$dependencies_missing_count" -eq 0 ]; then
+        echo "All required packages are installed. Continuing to execute the script."
+    else
+        echo "There are $dependencies_missing_count missing packages for this command to run properly."
+        echo "Attempting to run the script, but it may not work properly."
+    fi
 }
 
-listUsers
-
-
-#==========================================================================
-center
-echo;echo;echo
+depCheck "$@"

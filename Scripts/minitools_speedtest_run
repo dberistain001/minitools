@@ -1,6 +1,11 @@
 #!/usr/bin/bash
 #writen by dberistain
 
+#Dependencies checker 
+dependencies="wget"
+minitools_dependencies_checker $dependencies
+
+
 wget -O  speedtest.py https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py
 clear -x 
 echo "========================================================="

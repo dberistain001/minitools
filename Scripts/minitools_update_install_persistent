@@ -41,6 +41,12 @@ center() {
 }
 
 
+#Dependencies checker 
+dependencies="curl"
+dminitools_dependencies_checker $dependencies
+
+
+
 #clear the screen
 clear -x
 

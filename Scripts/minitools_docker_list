@@ -1,7 +1,6 @@
 #!/usr/bin/bash
 #writen by dberistain
 
-
 #Defining some colors =========================
 red="$(tput setaf 196)";
 yellow="$(tput setaf 226)";
@@ -35,6 +34,11 @@ center() {
   done
   echo "$blue$bbar$r"
 }
+
+
+#Dependencies checker 
+dependencies="docker"
+minitools_dependencies_checker $dependencies
 
 
 
@@ -73,8 +77,8 @@ activeContainers=$(docker ps -a -q|awk {'print $1'}|grep -v "CONTAINER");
         }
 
 #function to get image name 
-                                containerImage() {
-                                containerImageName=$(docker container inspect $container|grep Image |grep -v sha256|awk {'print $2'}|tr -d '",')
+        containerImage() {
+        containerImageName=$(docker container inspect $container|grep Image |grep -v sha256|awk {'print $2'}|tr -d '",')
         echo $containerImageName
                                 }
 

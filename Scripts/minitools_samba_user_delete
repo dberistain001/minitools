@@ -49,6 +49,10 @@ listUsers() {
   echo
 }
 
+#Dependencies checker 
+dependencies="pdbedit smbpasswd"
+minitools_dependencies_checker $dependencies
+
 
 removeSambaUser() {
 center "Here are the available Samba users to be removed"
