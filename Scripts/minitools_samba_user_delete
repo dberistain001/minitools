@@ -1,0 +1,163 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+
+# Define the main Samba configuration file
+smb_config="/etc/samba/smb.conf"
+
+#Defining some colors =========================
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+
+#Defining bar spacers parameters ==============
+masterWidth="80";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+flag=$1
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+clear -x;echo
+
+#==========================================================================
+
+listUsers() {
+  center "Samba Users"
+  pdbedit -L -v | grep -e Unix -e Directory -e "---------------"
+  echo
+}
+
+
+removeSambaUser() {
+center "Here are the available Samba users to be removed"
+echo
+pdbedit -L -v | grep -e Unix | awk '{print $3}' | awk '{ printf("%-4s %s\n", NR, $0) }'
+echo
+
+center
+
+
+
+#get user Selection and make sure that the selection is not empty 
+while true; do
+	read -p "Enter the number of the user to remove: " option3_usertodel_number
+	echo
+	user_selection=$(pdbedit -L -v | grep -e Unix | awk '{print $3}' | awk NR==$option3_usertodel_number)
+
+	if [ -z "$user_selection" ]; then
+	    echo "$red The username $user_selection does not exist, please refer to the list and try again $r"
+
+	else 
+		break
+
+	fi
+done
+
+
+echo "The selected user for $red$bold DELETION $r is $bold$user_selection $r"
+
+#delete samaba user query 
+while true;do 
+		echo "Would you like to continue and remove the Samba user? (y/n)"
+	  read -p "[ Pres Ctrl+C to Cancel ]  :" option3_usertodel_query
+		if [ "$option3_usertodel_query" = "y" ]; then
+		break
+
+		elif [ "$option3_usertodel_query" = "n" ]; then
+		break
+
+		else
+		    echo "$bold Please select 'y' or 'n' $r"
+		    echo
+		fi
+done
+
+#delete UNIX user query 
+while true;do 
+echo "Do you want to also delete the associated Unix user? (y/n)"
+read -p "[ Pres Ctrl+C to Cancel ]  :" option3_unixdel_query
+		if [ "$option3_unixdel_query" = "y" ]; then
+		break
+
+		elif [ "$option3_unixdel_query" = "n" ]; then
+		break
+
+		else
+		    echo "$bold Please select 'y' or 'n' $r"
+		    echo
+		fi
+done
+
+
+#delete both Activated will delete samaba and unix users
+if [ "$option3_unixdel_query" = "y" ] && [ "$option3_usertodel_query" = "y" ]; then
+        center
+    smbpasswd -d $user_selection
+    smbpasswd -x $user_selection
+    echo
+    echo "$r$bold$green2 The Samba user $user_selection has been removed $r"
+    userdel $user_selection
+    echo "$r$bold$green2 The Unix user $user_selection has been removed $r"
+    echo
+   center
+
+#only delete the samba User
+elif [ "$option3_unixdel_query" = "y" ] && [ "$option3_usertodel_query" = "n" ]; then
+        center
+    smbpasswd -d $user_selection
+    smbpasswd -x $user_selection
+    echo
+    echo "$r$bold$green2 The Samba user $user_selection has been removed $r"
+    echo "$r$bold$green2 The Unix user $user_selection was NOT removed $r"
+    echo
+   center
+
+#only delete the Unix user 
+elif [ "$option3_unixdel_query" = "n" ] && [ "$option3_usertodel_query" = "y" ]; then
+    center
+    userdel $user_selection
+    echo
+    echo "$r$bold$green2 The Unix user $user_selection has been removed $r"
+    echo "$r$bold$green2 The Samba user $user_selection was NOT removed $r"
+    echo
+   center
+
+#dont delete anything or the else statment 
+else
+	center
+	echo "$yellow""Nothing was selected for deletion, Please try again"
+	echo
+	echo "$r$bold$green2 The Samba user $user_selection was NOT removed $r"
+  echo "$r$bold$green2 The Unix user $user_selection was NOT removed $r"
+  echo
+fi
+
+}
+
+listUsers;removeSambaUser;listUsers
+
+#==========================================================================
+center
+echo;echo;echo

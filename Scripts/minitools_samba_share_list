@@ -1,0 +1,74 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+
+# Define the main Samba configuration file
+smb_config="/etc/samba/smb.conf"
+
+#Defining some colors =========================
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+
+#Defining bar spacers parameters ==============
+masterWidth="80";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+flag=$1
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+clear -x;echo
+
+# Function to extract share names from the Samba config file (excluding defaults)
+get_share_names() {
+    grep -E '^\[.+\]' "$smb_config" | sed 's/\[//;s/\]//' | grep -vE '^(global|homes|printers|print\$)'
+}
+
+# Function to extract included configuration files and retrieve share names from them
+get_included_shares() {
+    included_files=$(grep -E '^\s*include\s*=\s*.+' "$smb_config" | awk -F'=' '{gsub(/^ +| +$/, "", $2); print $2}')
+    
+    for include_file in $included_files; do
+        if [ -f "$include_file" ]; then
+            grep -E '^\[.+\]' "$include_file" | sed 's/\[//;s/\]//'
+        fi
+    done
+}
+
+# Main function to list Samba shares excluding defaults
+list_samba_shares() {
+    center "Samba Shares"
+    get_share_names
+
+    echo ""
+    center "Shares from Included Files"
+    get_included_shares
+}
+
+# Call the main function
+list_samba_shares
+
+center
+echo;echo;echo

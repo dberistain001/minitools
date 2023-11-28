@@ -1,0 +1,158 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+
+# Define the main Samba configuration file
+smb_config="/etc/samba/smb.conf"
+
+#Defining some colors =========================
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+
+#Defining bar spacers parameters ==============
+masterWidth="80";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+flag=$1
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+clear -x;echo
+
+#==========================================================================
+
+listUsers() {
+  center "Samba Users"
+  pdbedit -L -v | grep -e Unix -e Directory -e "---------------"
+  echo
+}
+
+addSambaUser() {
+center
+
+while true ; do 
+	read -p "Please type a new unique username : " option2_username
+
+	# Check if the user already exists in Samba or Unix
+	if pdbedit -L -v | grep Unix | grep -q "$option2_username"; then
+	    echo
+	    echo "$red$bold SAMBA USER $option2_username ALREADY EXISTS. PLEASE REMOVE IT OR USE ANOTHER USERNAME $r"
+	    echo
+
+	elif grep -q "^$option2_username:" /etc/passwd; then
+	    echo
+	    echo "$red$bold UNIX USER $option2_username ALREADY EXISTS. PLEASE REMOVE IT OR USE ANOTHER USERNAME $r"
+	    echo
+
+	else 
+		break
+
+	fi
+done
+
+
+
+
+while true; do
+    read -s -p "Please type the user password: " option2_pass;echo
+    if [ -n "$option2_pass" ]; then
+        break
+    else
+        echo "$red""Password cannot be empty. Please try again""$r"
+    fi
+done
+echo
+
+
+
+while true; do 
+
+	read -p "Do you want the user to use shell login? (y/n) (Should be 'n' if the user only needs SMB access): " option2_shellenabled
+
+
+	if [ "$option2_shellenabled" = "y" ]; then
+	    option2_shellenabled=""
+	    shellenabled="YES"
+
+	    break
+
+	elif [ "$option2_shellenabled" = "n" ]; then
+	    option2_shellenabled="--shell /usr/sbin/nologin"
+	    shellenabled="NO"
+
+	    break
+
+	else
+	    echo "$bold Please select 'y' or 'n' $r"
+	    echo
+	fi
+
+done
+
+
+echo
+# Define the command to execute
+command_userCreate="useradd $option2_shellenabled -m -d /home/$option2_username -p $option2_pass $option2_username; (echo $option2_pass; echo $option2_pass) | smbpasswd -a -s $option2_username; smbpasswd -e $option2_username"
+
+
+while true ;do
+  clear -x
+	
+	echo "------------------------------------------"
+	echo "             User to Create"
+	echo "------------------------------------------"
+	echo " Username     : $option2_username"
+	echo " Password     : ***********"
+	echo " Shell access : $shellenabled"
+	echo "------------------------------------------"
+	echo
+
+	read -p "Looks good, Do you want to procced? (y/n): " command_userCreate_executequery
+
+	if [ "$command_userCreate_executequery" = "y" ]; then
+	    eval "$command_userCreate"
+	    echo
+	    break
+
+	elif [ "$command_userCreate_executequery" = "n" ]; then
+	    echo
+	    echo "No users were added"
+	    echo "$r"
+	    echo
+	    break
+
+	else 
+		echo "$bold Please select 'y' or 'n' $r"
+		echo
+	fi
+done
+
+}
+
+listUsers;addSambaUser;listUsers
+
+#==========================================================================
+center
+echo;echo;echo
