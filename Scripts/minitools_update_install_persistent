@@ -1,0 +1,135 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+#use this script to automatically download, install and update minitools 
+branch=main  #there is also the "testing" branch which has scripts that are currently in development 
+
+
+
+#Defining some colors =========================
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+
+#Defining bar spacers parameters ==============
+masterWidth="148";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+flag=$1
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+
+#clear the screen
+clear -x
+
+#dowload the minitools updated folder
+echo "================================================================================================="
+echo "       Downloading the latest availible minitools from github.com/dberistain001/minitools        "
+echo "                                   "$green"DOWNLOAD AND INSTALL $r       "
+echo "================================================================================================="
+
+
+#mk a tmp folder on the current device and download the files from the updated folder
+mkdir /tmp/minitools_update 2>/dev/null
+cd /tmp/minitools_update 
+
+#download the update files and kill the proccess if it fails to download, this way the clean up will not be executed as it may remove existing minitools
+echo "Downloading Update from the $branch branch"
+if curl -L  "https://github.com/dberistain001/minitools/archive/$branch.tar.gz" | tar -xzf - 
+then echo " * completed!"
+else echo " ! error downloading minitools update"
+        exit 1
+fi
+
+
+echo "Updating the following commands"
+echo
+ls -1 /tmp/minitools_update/minitools-main/Scripts
+echo
+echo "---------------------------------------------"
+echo
+
+
+#Cleaning old minitools files,
+echo Cleaning old minitools files,
+mkdir /tmp/old_minitools 2>/dev/null
+
+touch /usr/bin/minitools_.update
+if mv /usr/bin/minitools_* /tmp/old_minitools
+then echo " * completed!"
+else echo " ! error cleaning old minitools install"
+	exit 1
+fi
+echo "---------------------------------------------"
+echo
+
+
+#updating minittols scripts in /usr/bin
+echo "Updating minittols scripts in /usr/bin"
+
+if mv /tmp/minitools_update/minitools-main/Scripts/minitools_* /usr/bin/
+then echo " * Update completed succesfully"
+else echo " ! Failed to complete update"
+     exit 1
+fi
+echo "---------------------------------------------"
+echo
+
+
+#updating new scripts permissions on this system, to allow execution
+echo "Updating new scripts execution permissions on this system"
+
+if chmod +x /usr/bin/minitools_*
+then echo " * Done"
+else echo " ! Failed to update permissions you may need to call the scripts manually with bash scriptname.sh"
+fi
+echo "---------------------------------------------"
+echo
+
+
+
+
+#cleaning up temp files
+echo "cleaning up temp files "
+if rm /tmp/minitools_update -r
+then echo " * Done"
+else echo " ! Failed to clean tmp files, please clean up manually"
+     echo "tmp folder is located in /tmp/minitools_update/"
+fi
+echo
+
+
+echo "=============================================================================="
+echo "                              DONE"
+echo "=============================================================================="
+echo " $green You can now call minitools scripts as regular binaries"
+echo " $green    You can now also use the Tab>Tab autoCompletion $r"
+echo " $green        This installation will be persistent $r"
+echo " $green Use the command minitools_uninstall_persistent to uninstall all tools $r"
+echo "=============================================================================="
+
+
+
+

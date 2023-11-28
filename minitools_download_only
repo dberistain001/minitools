@@ -1,0 +1,91 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+#use this script to automatically download, minitools 
+branch=main  #there is also the "testing" branch which has scripts that are currently in development 
+downloadFolder=/tmp/minitools_download
+
+
+#Defining some colors =========================
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+
+#Defining bar spacers parameters ==============
+masterWidth="148";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+flag=$1
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+
+#clear the screen
+clear -x
+
+#dowload the minitools updated folder
+echo "================================================================================================="
+echo "       Downloading the latest availible minitools from github.com/dberistain001/minitools        "
+echo "                                   "$green"DOWNLOAD ONLY $r       "
+echo "================================================================================================="
+
+#clean old files 
+rm $downloadFolder -r
+
+#mk a tmp folder on the current device and download the files from the updated folder
+mkdir $downloadFolder 2>/dev/null
+cd $downloadFolder
+
+#download the update files and kill the proccess if it fails to download, this way the clean up will not be executed as it may remove existing minitools
+echo "Downloading Update from the $branch branch"
+if curl -L  "https://github.com/dberistain001/minitools/archive/$branch.tar.gz" | tar -xzf - 
+then echo " * completed!"
+else echo " ! error downloading minitools update"
+        exit 1
+fi
+
+
+#updating new scripts permissions on this system, to allow execution
+echo "Updating new scripts execution permissions"
+
+if chmod +x $downloadFolder/minitools-main/Scripts/minitools_*
+then echo " * Done"
+else echo " ! Failed to update permissions you may need to call the scripts manually with bash scriptname.sh"
+fi
+echo "---------------------------------------------"
+echo
+
+
+echo "The following scripts are now availible in $downloadFolder"
+echo "You can call then using bash NAME or ./NAME"
+echo
+ls -1 $downloadFolder/minitools-main/Scripts
+echo
+echo "---------------------------------------------"
+echo
+
+
+echo "================================================================="
+echo "                DONE"
+echo "================================================================="

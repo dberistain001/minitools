@@ -1,0 +1,74 @@
+#minitools_uninstall
+#!/usr/bin/bash
+#writen by dberistain
+
+#use this script to automatically remove minitools that were installed with the minitools_update_install_persitent script
+
+#Defining some colors =========================
+red="$(tput setaf 196)";
+yellow="$(tput setaf 226)";
+blue="$(tput setaf 69)";
+green="$(tput setaf 118)";
+gray="$(tput setaf 237)";
+bold="$(tput bold)";
+r="$(tput sgr0)";
+blink="$(tput blink)";
+#Defining some colors [END] ===================
+
+
+#Defining bar spacers parameters ==============
+masterWidth="148";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth)) ;
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth)) ;
+flag=$1
+#Defining bar spacers parameters [END] ========
+
+
+center() {
+  width=$masterWidth
+  echo;echo "$blue$bbar$r"
+  for i
+  do
+    iCount="${#i}"
+    if [ $(($iCount%2)) -eq 0 ];then fill="";else fill=" ";fi
+    padding=$(( ( $width - $iCount - 2) / 2 ))
+    padding=$(printf '%0.s ' $(seq 1 $padding))
+    echo "$padding" "$bold$i$r" "$padding""$fill"
+  done
+  echo "$blue$bbar$r"
+}
+
+
+#clear the screen
+clear -x
+
+#dowload the minitools updated folder
+echo "================================================================================================="
+echo "                            Uninstalling minitools from this system        "
+echo "================================================================================================="
+
+
+#Cleaning  minitools files,
+echo Cleaning minitools files,
+mkdir /tmp/old_minitools 2>/dev/null
+
+touch /usr/bin/minitools_.update
+if mv /usr/bin/minitools_* /tmp/old_minitools
+then echo " * completed!" 
+	 echo " * You can find a copy of the removed files in /tmp/old_minitools, feel free to remove them too if not needed"
+else echo " ! error cleaning old minitools install"
+	exit 1
+fi
+echo "---------------------------------------------"
+echo
+
+
+echo "================================================================="
+echo "                              DONE"
+echo "================================================================="
+echo "                    $green Minitools was removed! "
+echo "================================================================="
+
+
+
+
