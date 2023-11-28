@@ -21,15 +21,13 @@ Changes and new scripts will be first posted into the testing branch, and merged
 
 * To only download the scripts to your system without saving them to /usr/bin but to a tmp folder use the command below
 <pre>
-```curl -sSL https://raw.githubusercontent.com/dberistain001/minitools/main/minitools_update_install_persistent | bash
-```
+curl -sSL https://raw.githubusercontent.com/dberistain001/minitools/main/minitools_update_install_persistent | bash
 </pre>
 
 
-* To only download the scripts to your system without saving them to /usr/bin but to a tmp folder use the command below
+* To Install in persistent mode on your system saving the scripts to /usr/bin, this allows the user to install minitools and call them with tabtab auto-completion 
 <pre>
-```curl -sSL https://raw.githubusercontent.com/dberistain001/minitools/main/minitools_download_only | bash
-```
+curl -sSL https://raw.githubusercontent.com/dberistain001/minitools/main/minitools_download_only | bash
 </pre>
 
 
