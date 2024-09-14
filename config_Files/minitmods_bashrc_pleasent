@@ -1,0 +1,42 @@
+#!/bin/bash
+
+#These customizations will enhance your command-line experience by improving usability and functionality. 
+
+#the updated script that ensures your prompt shows the full path of the current directory, with the username in green and hostname in red
+
+
+# Define the file to be modified
+PROFILE_FILE="$HOME/.bashrc"
+
+# Backup the existing profile file
+cp "$PROFILE_FILE" "$PROFILE_FILE.bak"
+
+# Add aliases and prompt customization to the profile file
+cat << 'EOF' >> "$PROFILE_FILE"
+
+# Alias ll to ls -lash
+alias ll='ls -lash'
+
+# Enable colors for ls and grep
+alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+
+# Quick navigation
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+
+# File and directory operations
+alias rm='rm -i'  # Prompt before removing files
+alias cp='cp -i'  # Prompt before overwriting files
+alias mv='mv -i'  # Prompt before overwriting files
+
+# Enhanced prompt with username in green, hostname in red, and full path
+PS1='\[\033[01;32m\]\u\[\033[00m\]@\[\033[01;31m\]\h\[\033[00m\]:\[\033[01;32m\]\w\[\033[00m\]\$ '
+EOF
+
+# Apply changes
+echo "Sourcing $PROFILE_FILE to apply changes..."
+source "$PROFILE_FILE"
+
+echo "Changes applied successfully."
