@@ -1,0 +1,188 @@
+#!/usr/bin/bash
+
+#writen by dberistain
+#Lists running QEMU/KVM virtual machines managed by libvirt.
+
+URI="qemu:///system"
+
+#Defining some colors =========================
+if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
+    red="$(tput setaf 196 2>/dev/null)"
+    yellow="$(tput setaf 226 2>/dev/null)"
+    blue="$(tput setaf 69 2>/dev/null)"
+    green="$(tput setaf 118 2>/dev/null)"
+    bold="$(tput bold 2>/dev/null)"
+    r="$(tput sgr0 2>/dev/null)"
+else
+    red=""; yellow=""; blue=""; green=""; bold=""; r=""
+fi
+#Defining some colors [END] ===================
+
+#Dependencies checker =========================
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then
+    minitools_dependencies_checker virsh awk grep sed
+fi
+
+if ! command -v virsh >/dev/null 2>&1; then
+    echo "${red}virsh is not installed.${r}"
+    echo "Install it on Debian/Ubuntu with: apt install libvirt-clients"
+    exit 1
+fi
+#Dependencies checker [END] ===================
+
+#Verify that the local libvirt QEMU connection is available.
+if ! virsh -c "$URI" list >/dev/null 2>&1; then
+    echo "${red}Unable to connect to ${URI}.${r}"
+    echo "QEMU/libvirt may not be installed/running, or this user lacks permission."
+    echo "Try: sudo systemctl status libvirtd virtqemud"
+    echo "Or run this command with sudo."
+    exit 1
+fi
+
+hypervisor="$(virsh -c "$URI" version 2>/dev/null | awk -F': ' '/Running hypervisor:/ {print $2; exit}')"
+[[ -z "$hypervisor" ]] && hypervisor="QEMU/libvirt"
+
+#Only domains that are actually in the running state.
+mapfile -t vms < <(virsh -c "$URI" list --state-running --name 2>/dev/null | sed '/^[[:space:]]*$/d')
+
+printf '\n%s%sQEMU / KVM Virtual Machines%s\n' "$bold" "$yellow" "$r"
+printf '%sHypervisor:%s %s\n' "$bold" "$r" "$hypervisor"
+printf '%sConnection:%s %s\n' "$bold" "$r" "$URI"
+printf '%sRunning VMs:%s %s\n\n' "$bold" "$r" "${#vms[@]}"
+
+if (( ${#vms[@]} == 0 )); then
+    echo "${yellow}No running QEMU/KVM virtual machines found.${r}"
+    exit 0
+fi
+
+get_hostname() {
+    local vm="$1" hostname
+
+    hostname="$(virsh -c "$URI" domhostname "$vm" --source agent 2>/dev/null | head -n 1)"
+    [[ -z "$hostname" ]] && hostname="$(virsh -c "$URI" domhostname "$vm" --source lease 2>/dev/null | head -n 1)"
+    [[ -z "$hostname" ]] && hostname="$(virsh -c "$URI" domhostname "$vm" 2>/dev/null | head -n 1)"
+    [[ -z "$hostname" ]] && hostname="N/A"
+
+    printf '%s' "$hostname"
+}
+
+get_networks() {
+    local vm="$1" networks
+
+    networks="$(virsh -c "$URI" domiflist "$vm" 2>/dev/null | awk '
+        NR > 2 && NF >= 5 {
+            if (!seen[$3]++) {
+                if (out != "") out = out ",";
+                out = out $3
+            }
+        }
+        END { print out }
+    ')"
+
+    [[ -z "$networks" ]] && networks="N/A"
+    printf '%s' "$networks"
+}
+
+get_ipv4_from_source() {
+    local vm="$1" source="$2"
+
+    virsh -c "$URI" domifaddr "$vm" --source "$source" 2>/dev/null | awk '
+        $3 == "ipv4" {
+            ip=$4
+            sub(/\/.*/, "", ip)
+            if (ip != "127.0.0.1" && !seen[ip]++) {
+                if (out != "") out = out ",";
+                out = out ip
+            }
+        }
+        END { print out }
+    '
+}
+
+get_ip() {
+    local vm="$1" ip
+
+    #Best source first: guest agent, then DHCP lease, then host ARP table.
+    ip="$(get_ipv4_from_source "$vm" agent)"
+    [[ -z "$ip" ]] && ip="$(get_ipv4_from_source "$vm" lease)"
+    [[ -z "$ip" ]] && ip="$(get_ipv4_from_source "$vm" arp)"
+    [[ -z "$ip" ]] && ip="N/A"
+
+    printf '%s' "$ip"
+}
+
+get_ram_gb() {
+    local vm="$1" kib
+
+    #For a running VM, "Used memory" is the current memory assigned to the domain.
+    kib="$(virsh -c "$URI" dominfo "$vm" 2>/dev/null | awk -F': *' '/^Used memory:/ {print $2}' | awk '{print $1}')"
+
+    if [[ "$kib" =~ ^[0-9]+$ ]]; then
+        awk -v kib="$kib" 'BEGIN { printf "%.1f", kib / 1024 / 1024 }'
+    else
+        printf 'N/A'
+    fi
+}
+
+get_vcpus() {
+    local vm="$1" cpus
+    cpus="$(virsh -c "$URI" dominfo "$vm" 2>/dev/null | awk -F': *' '/^CPU\(s\):/ {print $2; exit}')"
+    [[ -z "$cpus" ]] && cpus="N/A"
+    printf '%s' "$cpus"
+}
+
+get_disk_usage() {
+    local vm="$1" target info capacity allocation
+    local total_capacity=0
+    local total_allocation=0
+    local found=0
+
+    #Sum all devices whose libvirt device type is "disk"; ignore CD-ROMs/floppies.
+    while read -r target; do
+        [[ -z "$target" ]] && continue
+        info="$(virsh -c "$URI" domblkinfo "$vm" "$target" 2>/dev/null)"
+        capacity="$(awk '/^Capacity:/ {print $2; exit}' <<< "$info")"
+        allocation="$(awk '/^Allocation:/ {print $2; exit}' <<< "$info")"
+
+        if [[ "$capacity" =~ ^[0-9]+$ ]]; then
+            total_capacity=$(( total_capacity + capacity ))
+            found=1
+        fi
+        if [[ "$allocation" =~ ^[0-9]+$ ]]; then
+            total_allocation=$(( total_allocation + allocation ))
+        fi
+    done < <(virsh -c "$URI" domblklist "$vm" --details 2>/dev/null | awk 'NR > 2 && $2 == "disk" {print $3}')
+
+    if (( found == 0 )); then
+        printf 'N/A'
+    else
+        awk -v used="$total_allocation" -v cap="$total_capacity" 'BEGIN {
+            printf "%.1f/%.1f", used / 1073741824, cap / 1073741824
+        }'
+    fi
+}
+
+line="------------------------------------------------------------------------------------------------------------------------------------------"
+printf '%s%s%s\n' "$blue" "$line" "$r"
+printf ' %-3s | %-22s | %-22s | %-18s | %-20s | %-15s | %-7s | %-5s\n' \
+    "#" "VM NAME" "HOSTNAME" "NETWORK" "IP ADDRESS" "DISK GB USED/CAP" "RAM GB" "vCPU"
+printf '%s%s%s\n' "$blue" "$line" "$r"
+
+count=0
+for vm in "${vms[@]}"; do
+    count=$((count + 1))
+
+    hostname="$(get_hostname "$vm")"
+    network="$(get_networks "$vm")"
+    ip="$(get_ip "$vm")"
+    disk="$(get_disk_usage "$vm")"
+    ram="$(get_ram_gb "$vm")"
+    vcpus="$(get_vcpus "$vm")"
+
+    printf ' %-3s | %-22.22s | %-22.22s | %-18.18s | %-20.20s | %-15s | %-7s | %-5s\n' \
+        "$count" "$vm" "$hostname" "$network" "$ip" "$disk" "$ram" "$vcpus"
+done
+
+printf '%s%s%s\n\n' "$blue" "$line" "$r"
+echo "Disk = host allocation / virtual capacity in GiB."
+echo "Hostname/IP are most accurate when qemu-guest-agent is installed in the guest."
