@@ -1,0 +1,175 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+smb_config="/etc/samba/smb.conf"
+
+red="$(tput setaf 196 2>/dev/null || true)";
+yellow="$(tput setaf 226 2>/dev/null || true)";
+blue="$(tput setaf 69 2>/dev/null || true)";
+green="$(tput setaf 118 2>/dev/null || true)";
+gray="$(tput setaf 237 2>/dev/null || true)";
+bold="$(tput bold 2>/dev/null || true)";
+r="$(tput sgr0 2>/dev/null || true)";
+blink="$(tput blink 2>/dev/null || true)";
+
+masterWidth="148";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth));
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth));
+
+center() {
+    width=$masterWidth
+    echo
+    echo "$blue$bbar$r"
+    for i
+    do
+        iCount="${#i}"
+        if [ $((iCount%2)) -eq 0 ]; then fill=""; else fill=" "; fi
+        padding=$(( ( width - iCount - 2) / 2 ))
+        if [ "$padding" -lt 0 ]; then padding=0; fi
+        if [ "$padding" -gt 0 ]; then padding=$(printf '%0.s ' $(seq 1 "$padding")); else padding=""; fi
+        echo "$padding" "$bold$i$r" "$padding""$fill"
+    done
+    echo "$blue$bbar$r"
+}
+
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo
+        echo "${red}${bold}ERROR: This command must be run as root.${r}"
+        echo "${green}Run: sudo $0${r}"
+        echo
+        exit 1
+    fi
+}
+
+check_dependencies() {
+    if command -v minitools_dependencies_checker >/dev/null 2>&1; then
+        minitools_dependencies_checker "$@"
+    else
+        local missing=0 dep
+        for dep in "$@"; do
+            if ! command -v "$dep" >/dev/null 2>&1; then
+                echo "${red}Missing dependency: $dep${r}"
+                missing=$((missing+1))
+            fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+    fi
+}
+
+reload_samba() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl reload smbd >/dev/null 2>&1 && return 0
+        systemctl reload samba >/dev/null 2>&1 && return 0
+    fi
+    if command -v service >/dev/null 2>&1; then
+        service smbd reload >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+share_names() {
+    testparm -s "$smb_config" 2>/dev/null |
+    awk '/^\[[^]]+\]/ {
+        name=$0
+        gsub(/^[[:space:]]*\[/, "", name)
+        gsub(/\][[:space:]]*$/, "", name)
+        low=tolower(name)
+        if (low!="global" && low!="homes" && low!="printers" && low!="print$") print name
+    }'
+}
+
+share_param() {
+    local share="$1"
+    local parameter="$2"
+    testparm -s --section-name="$share" --parameter-name="$parameter" "$smb_config" 2>/dev/null | tail -n 1
+}
+
+yes_answer() {
+    case "${1,,}" in
+        y|yes|s|si|sí) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+clear -x
+check_dependencies testparm findmnt df stat
+
+if [ ! -f "$smb_config" ]; then
+    echo "${red}Samba configuration not found: $smb_config${r}"
+    exit 1
+fi
+
+mapfile -t shares < <(share_names)
+center "SAMBA SHARE LIST"
+
+if [ "${#shares[@]}" -eq 0 ]; then
+    echo
+    echo " No non-default Samba shares were found."
+    center
+    exit 0
+fi
+
+printf " %-4s | %-30s | %-14s | %-12s | %-16s | %-16s\n" "#" "SHARE NAME" "ACCESS" "TIME MACHINE" "CONNECTIONS" "STATUS"
+echo "$blue$bbar$r"
+
+num=0
+for share in "${shares[@]}"; do
+    num=$((num+1))
+    path="$(share_param "$share" "path")"
+    guest="$(share_param "$share" "guest ok")"
+    readonly="$(share_param "$share" "read only")"
+    browseable="$(share_param "$share" "browseable")"
+    users="$(share_param "$share" "valid users")"
+    timemachine="$(share_param "$share" "fruit:time machine")"
+
+    [ -n "$path" ] || path="N/A"
+    [ -n "$guest" ] || guest="No"
+    [ -n "$readonly" ] || readonly="Yes"
+    [ -n "$browseable" ] || browseable="Yes"
+    [ -n "$timemachine" ] || timemachine="No"
+
+    if [[ "${guest,,}" == "yes" ]]; then
+        access="PUBLIC"
+        display_users="Guest / Public"
+    else
+        access="PRIVATE"
+        display_users="${users:-All authenticated users}"
+    fi
+
+    if [ "$path" != "N/A" ] && [ -e "$path" ]; then
+        status="${green}ONLINE${r}"
+        mountpoint="$(findmnt -T "$path" -n -o TARGET 2>/dev/null | head -n1)"
+        source="$(findmnt -T "$path" -n -o SOURCE 2>/dev/null | head -n1)"
+        fstype="$(findmnt -T "$path" -n -o FSTYPE 2>/dev/null | head -n1)"
+        usage="$(df -hP "$path" 2>/dev/null | awk 'NR==2 {print $3 "/" $2 " used (" $5 ")"}')"
+        owner="$(stat -c '%U:%G' "$path" 2>/dev/null)"
+        perms="$(stat -c '%a' "$path" 2>/dev/null)"
+    else
+        status="${red}PATH MISSING${r}"
+        mountpoint="N/A"; source="N/A"; fstype="N/A"; usage="N/A"; owner="N/A"; perms="N/A"
+    fi
+
+    [ -n "$mountpoint" ] || mountpoint="N/A"
+    [ -n "$source" ] || source="N/A"
+    [ -n "$fstype" ] || fstype="N/A"
+    [ -n "$usage" ] || usage="N/A"
+    [ -n "$owner" ] || owner="N/A"
+    [ -n "$perms" ] || perms="N/A"
+
+    if command -v smbstatus >/dev/null 2>&1 && [ "$EUID" -eq 0 ]; then
+        connections="$(smbstatus -S 2>/dev/null | awk -v s="$share" '$1==s {c++} END {print c+0}')"
+    else
+        connections="N/A"
+    fi
+
+    echo "$blue$bbar$r"
+    printf " %-4s | %-30s | %-14s | %-12s | %-16s | %-16b\n" "$num" "$share" "$access" "${timemachine^^}" "$connections" "$status"
+    printf "      %-16s %-63s | %-16s %-45s\n" "Path:" "$path" "Mount point:" "$mountpoint"
+    printf "      %-16s %-26s | %-10s %-14s | %-12s %-18s | %-10s %-14s\n" "Source:" "$source" "FS:" "$fstype" "Disk:" "$usage" "Perms:" "$perms"
+    printf "      %-16s %-63s | %-16s %-45s\n" "Authorized:" "$display_users" "Owner:" "$owner"
+    printf "      %-16s %-20s | %-16s %-20s | %-16s %-20s\n" "Read only:" "${readonly^^}" "Browseable:" "${browseable^^}" "Guest access:" "${guest^^}"
+done
+
+center
+echo

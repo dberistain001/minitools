@@ -1,0 +1,235 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+smb_config="/etc/samba/smb.conf"
+
+red="$(tput setaf 196 2>/dev/null || true)";
+yellow="$(tput setaf 226 2>/dev/null || true)";
+blue="$(tput setaf 69 2>/dev/null || true)";
+green="$(tput setaf 118 2>/dev/null || true)";
+gray="$(tput setaf 237 2>/dev/null || true)";
+bold="$(tput bold 2>/dev/null || true)";
+r="$(tput sgr0 2>/dev/null || true)";
+blink="$(tput blink 2>/dev/null || true)";
+
+masterWidth="148";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth));
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth));
+
+center() {
+    width=$masterWidth
+    echo
+    echo "$blue$bbar$r"
+    for i
+    do
+        iCount="${#i}"
+        if [ $((iCount%2)) -eq 0 ]; then fill=""; else fill=" "; fi
+        padding=$(( ( width - iCount - 2) / 2 ))
+        if [ "$padding" -lt 0 ]; then padding=0; fi
+        if [ "$padding" -gt 0 ]; then padding=$(printf '%0.s ' $(seq 1 "$padding")); else padding=""; fi
+        echo "$padding" "$bold$i$r" "$padding""$fill"
+    done
+    echo "$blue$bbar$r"
+}
+
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo
+        echo "${red}${bold}ERROR: This command must be run as root.${r}"
+        echo "${green}Run: sudo $0${r}"
+        echo
+        exit 1
+    fi
+}
+
+check_dependencies() {
+    if command -v minitools_dependencies_checker >/dev/null 2>&1; then
+        minitools_dependencies_checker "$@"
+    else
+        local missing=0 dep
+        for dep in "$@"; do
+            if ! command -v "$dep" >/dev/null 2>&1; then
+                echo "${red}Missing dependency: $dep${r}"
+                missing=$((missing+1))
+            fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+    fi
+}
+
+reload_samba() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl reload smbd >/dev/null 2>&1 && return 0
+        systemctl reload samba >/dev/null 2>&1 && return 0
+    fi
+    if command -v service >/dev/null 2>&1; then
+        service smbd reload >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+share_names() {
+    testparm -s "$smb_config" 2>/dev/null |
+    awk '/^\[[^]]+\]/ {
+        name=$0
+        gsub(/^[[:space:]]*\[/, "", name)
+        gsub(/\][[:space:]]*$/, "", name)
+        low=tolower(name)
+        if (low!="global" && low!="homes" && low!="printers" && low!="print$") print name
+    }'
+}
+
+share_param() {
+    local share="$1"
+    local parameter="$2"
+    testparm -s --section-name="$share" --parameter-name="$parameter" "$smb_config" 2>/dev/null | tail -n 1
+}
+
+yes_answer() {
+    case "${1,,}" in
+        y|yes|s|si|sí) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+clear -x
+require_root
+check_dependencies testparm smbpasswd pdbedit getent useradd groupadd usermod
+
+[ -f "$smb_config" ] || { echo "${red}Samba configuration not found: $smb_config${r}"; exit 1; }
+testparm -s "$smb_config" >/dev/null 2>&1 || { echo "${red}Current Samba configuration is invalid. Nothing changed.${r}"; exit 1; }
+
+center "CREATE SAMBA SHARE"
+read -r -p "Share name: " share_name
+share_name="$(echo "$share_name" | xargs)"
+[ -n "$share_name" ] || exit 1
+[[ "$share_name" != *"["* && "$share_name" != *"]"* && "$share_name" != *"/"* ]] || { echo "${red}Invalid share name.${r}"; exit 1; }
+case "${share_name,,}" in global|homes|printers|print\$) echo "${red}Reserved share name.${r}"; exit 1;; esac
+while IFS= read -r s; do [ "${s,,}" = "${share_name,,}" ] && { echo "${red}Share already exists.${r}"; exit 1; }; done < <(share_names)
+
+read -r -p "Mount point / folder to share (absolute path): " share_path
+[[ "$share_path" == /* ]] || { echo "${red}Path must be absolute.${r}"; exit 1; }
+created_path="no"
+if [ ! -d "$share_path" ]; then
+    read -r -p "Path does not exist. Create it? [y/N]: " answer
+    yes_answer "$answer" || { echo "Cancelled."; exit 0; }
+    mkdir -p -- "$share_path" || exit 1
+    created_path="yes"
+fi
+
+echo
+echo "  1) Private - authorized Samba users only"
+echo "  2) Public  - guest access allowed"
+read -r -p "Access type [1/2]: " access_choice
+
+authorized_users=()
+if [ "$access_choice" = "1" ]; then
+    access_type="private"
+    read -r -p "Authorized users (comma or space separated): " input
+    input="${input//,/ }"
+    for user in $input; do
+        duplicate=no
+        for u in "${authorized_users[@]}"; do [ "$u" = "$user" ] && duplicate=yes; done
+        [ "$duplicate" = yes ] && continue
+
+        if ! getent passwd "$user" >/dev/null; then
+            read -r -p "Linux user '$user' does not exist. Create it? [y/N]: " answer
+            if yes_answer "$answer"; then
+                nologin_shell="$(command -v nologin 2>/dev/null || echo /usr/sbin/nologin)"
+                useradd -M -s "$nologin_shell" "$user" || continue
+            else
+                continue
+            fi
+        fi
+
+        if ! pdbedit -L 2>/dev/null | cut -d: -f1 | grep -Fxq "$user"; then
+            read -r -p "Samba user '$user' does not exist. Create it and set password? [y/N]: " answer
+            yes_answer "$answer" || continue
+            smbpasswd -a "$user" || continue
+        fi
+        authorized_users+=("$user")
+    done
+    [ "${#authorized_users[@]}" -gt 0 ] || { echo "${red}Private shares require at least one authorized user.${r}"; exit 1; }
+
+    safe_group="$(printf '%s' "$share_name" | tr '[:upper:] ' '[:lower:]_' | tr -cd 'a-z0-9_-')"
+    samba_group="smb_${safe_group:0:24}"
+    if [ "$created_path" = yes ]; then prompt="Apply recommended group permissions ($samba_group / 2770)? [Y/n]: "; default_yes=yes; else prompt="Existing path: apply group $samba_group and chmod 2770 to share root? [y/N]: "; default_yes=no; fi
+    read -r -p "$prompt" answer
+    apply=no
+    if [ "$default_yes" = yes ] && ! [[ "${answer,,}" =~ ^(n|no)$ ]]; then apply=yes; fi
+    yes_answer "$answer" && apply=yes
+    if [ "$apply" = yes ]; then
+        getent group "$samba_group" >/dev/null || groupadd "$samba_group" || exit 1
+        for user in "${authorized_users[@]}"; do usermod -aG "$samba_group" "$user"; done
+        chgrp "$samba_group" "$share_path" && chmod 2770 "$share_path" || echo "${yellow}Warning: filesystem permissions were not fully applied.${r}"
+    fi
+elif [ "$access_choice" = "2" ]; then
+    access_type="public"
+    if [ "$created_path" = yes ]; then
+        chmod 0777 "$share_path"
+    else
+        read -r -p "Make existing share root guest-writable with chmod 0777? [y/N]: " answer
+        yes_answer "$answer" && chmod 0777 "$share_path"
+    fi
+else
+    echo "${red}Invalid selection.${r}"; exit 1
+fi
+
+read -r -p "Use this as an Apple Time Machine backup target? [y/N]: " answer
+if yes_answer "$answer"; then time_machine=yes; else time_machine=no; fi
+if [ "$time_machine" = yes ] && [ "$access_type" = public ]; then
+    echo "${yellow}WARNING: Public Time Machine shares expose backups to guest clients.${r}"
+    read -r -p "Continue as PUBLIC Time Machine target? [y/N]: " answer
+    yes_answer "$answer" || time_machine=no
+fi
+
+tm_max=""
+if [ "$time_machine" = yes ]; then
+    read -r -p "Optional Time Machine max size (example 500G, blank = unlimited): " tm_max
+    if [ -n "$tm_max" ] && ! [[ "$tm_max" =~ ^[0-9]+([KkMmGgTtPp])?$ ]]; then echo "${yellow}Invalid limit ignored.${r}"; tm_max=""; fi
+fi
+
+backup="${smb_config}.minitools_backup_$(date +%Y%m%d_%H%M%S).bak"
+cp -a "$smb_config" "$backup" || exit 1
+{
+    echo
+    echo "# BEGIN MINITOOLS SHARE: $share_name"
+    echo "[$share_name]"
+    echo "    path = $share_path"
+    echo "    browseable = yes"
+    echo "    read only = no"
+    if [ "$access_type" = private ]; then
+        echo "    guest ok = no"
+        printf "    valid users ="; printf " %s" "${authorized_users[@]}"; echo
+        echo "    create mask = 0660"
+        echo "    directory mask = 0770"
+    else
+        echo "    guest ok = yes"
+        echo "    create mask = 0666"
+        echo "    directory mask = 0777"
+    fi
+    if [ "$time_machine" = yes ]; then
+        echo "    vfs objects = fruit streams_xattr"
+        echo "    fruit:time machine = yes"
+        [ -n "$tm_max" ] && echo "    fruit:time machine max size = $tm_max"
+    fi
+    echo "# END MINITOOLS SHARE: $share_name"
+} >> "$smb_config"
+
+if ! testparm -s "$smb_config" >/dev/null 2>&1; then
+    cp -a "$backup" "$smb_config"
+    echo "${red}New configuration failed validation; original restored.${r}"
+    exit 1
+fi
+reload_samba || echo "${yellow}Config is valid, but Samba could not be reloaded automatically.${r}"
+
+center "SAMBA SHARE CREATED"
+printf " %-22s %s\n" "Share:" "$share_name"
+printf " %-22s %s\n" "Path:" "$share_path"
+printf " %-22s %s\n" "Access:" "${access_type^^}"
+[ "$access_type" = private ] && printf " %-22s %s\n" "Authorized users:" "${authorized_users[*]}"
+printf " %-22s %s\n" "Time Machine:" "${time_machine^^}"
+printf " %-22s %s\n" "Config backup:" "$backup"
+echo "${yellow}No files inside the shared directory were deleted or modified by the Samba config step.${r}"
+center
+echo

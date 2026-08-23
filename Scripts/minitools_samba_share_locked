@@ -1,0 +1,185 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+smb_config="/etc/samba/smb.conf"
+
+red="$(tput setaf 196 2>/dev/null || true)";
+yellow="$(tput setaf 226 2>/dev/null || true)";
+blue="$(tput setaf 69 2>/dev/null || true)";
+green="$(tput setaf 118 2>/dev/null || true)";
+gray="$(tput setaf 237 2>/dev/null || true)";
+bold="$(tput bold 2>/dev/null || true)";
+r="$(tput sgr0 2>/dev/null || true)";
+blink="$(tput blink 2>/dev/null || true)";
+
+masterWidth="148";
+bbar=$(printf '%0.s—' $(seq 1 $masterWidth));
+pbbar=$(printf '%0.s_' $(seq 1 $masterWidth));
+
+center() {
+    width=$masterWidth
+    echo
+    echo "$blue$bbar$r"
+    for i
+    do
+        iCount="${#i}"
+        if [ $((iCount%2)) -eq 0 ]; then fill=""; else fill=" "; fi
+        padding=$(( ( width - iCount - 2) / 2 ))
+        if [ "$padding" -lt 0 ]; then padding=0; fi
+        if [ "$padding" -gt 0 ]; then padding=$(printf '%0.s ' $(seq 1 "$padding")); else padding=""; fi
+        echo "$padding" "$bold$i$r" "$padding""$fill"
+    done
+    echo "$blue$bbar$r"
+}
+
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo
+        echo "${red}${bold}ERROR: This command must be run as root.${r}"
+        echo "${green}Run: sudo $0${r}"
+        echo
+        exit 1
+    fi
+}
+
+check_dependencies() {
+    if command -v minitools_dependencies_checker >/dev/null 2>&1; then
+        minitools_dependencies_checker "$@"
+    else
+        local missing=0 dep
+        for dep in "$@"; do
+            if ! command -v "$dep" >/dev/null 2>&1; then
+                echo "${red}Missing dependency: $dep${r}"
+                missing=$((missing+1))
+            fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+    fi
+}
+
+reload_samba() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl reload smbd >/dev/null 2>&1 && return 0
+        systemctl reload samba >/dev/null 2>&1 && return 0
+    fi
+    if command -v service >/dev/null 2>&1; then
+        service smbd reload >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+share_names() {
+    testparm -s "$smb_config" 2>/dev/null |
+    awk '/^\[[^]]+\]/ {
+        name=$0
+        gsub(/^[[:space:]]*\[/, "", name)
+        gsub(/\][[:space:]]*$/, "", name)
+        low=tolower(name)
+        if (low!="global" && low!="homes" && low!="printers" && low!="print$") print name
+    }'
+}
+
+share_param() {
+    local share="$1"
+    local parameter="$2"
+    testparm -s --section-name="$share" --parameter-name="$parameter" "$smb_config" 2>/dev/null | tail -n 1
+}
+
+yes_answer() {
+    case "${1,,}" in
+        y|yes|s|si|sí) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+clear -x
+require_root
+check_dependencies smbstatus python3 testparm
+center "SAMBA OPEN / LOCKED FILES"
+
+json_file="$(mktemp)"; records_file="$(mktemp)"
+trap 'rm -f "$json_file" "$records_file"' EXIT
+
+if smbstatus --json > "$json_file" 2>/dev/null && python3 -m json.tool "$json_file" >/dev/null 2>&1; then
+python3 - "$json_file" "$smb_config" > "$records_file" <<'PY'
+import sys, json, pwd, subprocess
+json_path, config = sys.argv[1], sys.argv[2]
+with open(json_path, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+sessions = data.get('sessions', {}) or {}
+tcons = data.get('tcons', {}) or {}
+open_files = data.get('open_files', {}) or {}
+
+def pid_of(obj):
+    try: return str(obj.get('server_id', {}).get('pid', ''))
+    except Exception: return ''
+
+share_paths = {}
+for tc in tcons.values():
+    service = str(tc.get('service', '') or '')
+    if not service or service in share_paths: continue
+    try:
+        p = subprocess.run(['testparm','-s','--section-name='+service,'--parameter-name=path',config], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=3)
+        share_paths[service] = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else ''
+    except Exception:
+        share_paths[service] = ''
+
+def session_for(pid, uid):
+    fallback = {}
+    for s in sessions.values():
+        if pid_of(s) == pid:
+            fallback = s
+            if str(s.get('uid','')) == str(uid): return s
+    return fallback
+
+def tcon_for(pid, service_path):
+    candidates = [tc for tc in tcons.values() if pid_of(tc) == pid]
+    for tc in candidates:
+        if share_paths.get(str(tc.get('service','') or '')) == service_path: return tc
+    return candidates[0] if candidates else {}
+
+sep='\x1f'
+for fullpath, entry in open_files.items():
+    service_path = str(entry.get('service_path','') or '')
+    filename = str(entry.get('filename','') or fullpath)
+    base_uid = entry.get('uid','')
+    opens = entry.get('opens',{}) or {'': entry}
+    for _, op in opens.items():
+        pid = pid_of(op) or pid_of(entry) or 'N/A'
+        uid = op.get('uid', base_uid)
+        sess = session_for(pid, uid)
+        tc = tcon_for(pid, service_path)
+        username = str(sess.get('username','') or '')
+        if not username:
+            try: username = pwd.getpwuid(int(uid)).pw_name
+            except Exception: username = str(uid) if uid != '' else 'N/A'
+        machine = str(tc.get('machine','') or sess.get('remote_machine','') or 'N/A')
+        client = str(sess.get('hostname','') or 'N/A')
+        share = str(tc.get('service','') or 'N/A')
+        access = str((op.get('sharemode',{}) or {}).get('text','') or (op.get('access_mask',{}) or {}).get('text','') or 'N/A')
+        opened = str(op.get('opened_at','') or 'N/A')
+        row=(share, filename, service_path, username, machine, client, access, opened, pid)
+        print(sep.join(str(x).replace(sep,' ') for x in row))
+PY
+
+    if [ -s "$records_file" ]; then
+        count=0
+        while IFS=$'\x1f' read -r share file service_path user machine client access opened pid; do
+            count=$((count+1))
+            echo "$blue$bbar$r"
+            printf " %-4s | %-28s | %-23s | %-22s | %-16s | %-12s\n" "$count" "$share" "$user" "$machine" "$access" "PID $pid"
+            printf "      %-15s %s\n" "File:" "$file"
+            printf "      %-15s %-65s | %-15s %s\n" "Share path:" "$service_path" "Client:" "$client"
+            printf "      %-15s %s\n" "Opened:" "$opened"
+        done < "$records_file"
+        echo "$blue$bbar$r"
+        echo " Total open/locked file handles: $count"
+    else
+        echo "${green}No Samba files are currently open/locked.${r}"
+    fi
+else
+    echo "${yellow}smbstatus JSON output is unavailable; showing Samba's native lock table.${r}"
+    echo
+    smbstatus --locks 2>/dev/null || smbstatus -L
+fi
+center; echo
