@@ -2,151 +2,24 @@
 #writen by dberistain
 
 smb_config="/etc/samba/smb.conf"
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="148"; bbar=$(printf '%0.s—' $(seq 1 $masterWidth));
 
-red="$(tput setaf 196 2>/dev/null || true)";
-yellow="$(tput setaf 226 2>/dev/null || true)";
-blue="$(tput setaf 69 2>/dev/null || true)";
-green="$(tput setaf 118 2>/dev/null || true)";
-gray="$(tput setaf 237 2>/dev/null || true)";
-bold="$(tput bold 2>/dev/null || true)";
-r="$(tput sgr0 2>/dev/null || true)";
-blink="$(tput blink 2>/dev/null || true)";
+center(){ width=$masterWidth; echo; echo "$blue$bbar$r"; for i; do iCount="${#i}"; [ $((iCount%2)) -eq 0 ] && fill="" || fill=" "; padding=$(( (width-iCount-2)/2 )); [ "$padding" -lt 0 ] && padding=0; [ "$padding" -gt 0 ] && padding=$(printf '%0.s ' $(seq 1 "$padding")) || padding=""; echo "$padding" "$bold$i$r" "$padding$fill"; done; echo "$blue$bbar$r"; }
+require_root(){ [ "$EUID" -eq 0 ] || { echo "${red}${bold}ERROR: This command must be run as root.${r}"; echo "${green}Run: sudo $0${r}"; exit 1; }; }
+yes_answer(){ case "${1,,}" in y|yes|s|si|sí) return 0;; *) return 1;; esac; }
+reload_samba(){ systemctl reload smbd >/dev/null 2>&1 || systemctl reload samba >/dev/null 2>&1 || service smbd reload >/dev/null 2>&1; }
+share_names(){ testparm -s "$smb_config" 2>/dev/null | awk '/^\[[^]]+\]/{n=$0;gsub(/^[[:space:]]*\[/,"",n);gsub(/\][[:space:]]*$/,"",n);l=tolower(n);if(l!="global"&&l!="homes"&&l!="printers"&&l!="print$")print n}'; }
+share_param(){ testparm -s --section-name="$1" --parameter-name="$2" "$smb_config" 2>/dev/null | tail -n1; }
+derive_share_group(){ local v; v="$(printf '%s' "$1" | tr '[:upper:] ' '[:lower:]_' | tr -cd 'a-z0-9_-')"; [ -n "$v" ] || v=share; printf 'smb_%s\n' "${v:0:24}"; }
 
-masterWidth="148";
-bbar=$(printf '%0.s—' $(seq 1 $masterWidth));
-pbbar=$(printf '%0.s_' $(seq 1 $masterWidth));
-
-center() {
-    width=$masterWidth
-    echo
-    echo "$blue$bbar$r"
-    for i
-    do
-        iCount="${#i}"
-        if [ $((iCount%2)) -eq 0 ]; then fill=""; else fill=" "; fi
-        padding=$(( ( width - iCount - 2) / 2 ))
-        if [ "$padding" -lt 0 ]; then padding=0; fi
-        if [ "$padding" -gt 0 ]; then padding=$(printf '%0.s ' $(seq 1 "$padding")); else padding=""; fi
-        echo "$padding" "$bold$i$r" "$padding""$fill"
-    done
-    echo "$blue$bbar$r"
-}
-
-require_root() {
-    if [ "$EUID" -ne 0 ]; then
-        echo
-        echo "${red}${bold}ERROR: This command must be run as root.${r}"
-        echo "${green}Run: sudo $0${r}"
-        echo
-        exit 1
-    fi
-}
-
-check_dependencies() {
-    if command -v minitools_dependencies_checker >/dev/null 2>&1; then
-        minitools_dependencies_checker "$@"
-    else
-        local missing=0 dep
-        for dep in "$@"; do
-            if ! command -v "$dep" >/dev/null 2>&1; then
-                echo "${red}Missing dependency: $dep${r}"
-                missing=$((missing+1))
-            fi
-        done
-        [ "$missing" -eq 0 ] || exit 1
-    fi
-}
-
-reload_samba() {
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl reload smbd >/dev/null 2>&1 && return 0
-        systemctl reload samba >/dev/null 2>&1 && return 0
-    fi
-    if command -v service >/dev/null 2>&1; then
-        service smbd reload >/dev/null 2>&1 && return 0
-    fi
-    return 1
-}
-
-share_names() {
-    testparm -s "$smb_config" 2>/dev/null |
-    awk '/^\[[^]]+\]/ {
-        name=$0
-        gsub(/^[[:space:]]*\[/, "", name)
-        gsub(/\][[:space:]]*$/, "", name)
-        low=tolower(name)
-        if (low!="global" && low!="homes" && low!="printers" && low!="print$") print name
-    }'
-}
-
-share_param() {
-    local share="$1"
-    local parameter="$2"
-    testparm -s --section-name="$share" --parameter-name="$parameter" "$smb_config" 2>/dev/null | tail -n 1
-}
-
-yes_answer() {
-    case "${1,,}" in
-        y|yes|s|si|sí) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-locate_share_file() {
-    local wanted="$1" f
-    while IFS= read -r -d '' f; do
-        if awk -v s="$wanted" '
-            function trim(x){gsub(/^[[:space:]]+|[[:space:]]+$/, "", x); return x}
-            { if (tolower(trim($0)) == tolower("[" s "]")) {found=1; exit} }
-            END {exit !found}
-        ' "$f" 2>/dev/null; then
-            echo "$f"; return 0
-        fi
-    done < <(find /etc/samba -maxdepth 4 -type f \( -name 'smb.conf' -o -name '*.conf' -o -name '*.inc' \) ! -name '*.bak' ! -name '*.old' -print0 2>/dev/null)
-    return 1
-}
-
-set_share_parameter() {
-    local file="$1" share="$2" key="$3" value="$4" tmp
-    tmp="$(mktemp)"
-    awk -v share="$share" -v key="$key" -v value="$value" '
-    function trim(x){gsub(/^[[:space:]]+|[[:space:]]+$/, "", x); return x}
-    function is_section(x){return x ~ /^\[[^]]+\]$/}
-    BEGIN {inside=0; done=0}
-    {
-        t=trim($0)
-        if (is_section(t)) {
-            if (inside && !done) {print "    " key " = " value; done=1}
-            inside=(tolower(t)==tolower("[" share "]"))
-        }
-        if (inside) {
-            eq=index($0,"=")
-            if (eq>0) {
-                left=trim(substr($0,1,eq-1))
-                if (tolower(left)==tolower(key)) {print "    " key " = " value; done=1; next}
-            }
-        }
-        print
-    }
-    END {if (inside && !done) print "    " key " = " value}
-    ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
-    cat "$tmp" > "$file"; rm -f "$tmp"
-}
-
-user_used_elsewhere() {
-    local username="$1" skip_share="$2" s values token
-    while IFS= read -r s; do
-        [ "$s" = "$skip_share" ] && continue
-        values="$(share_param "$s" "valid users")"; values="${values//,/ }"
-        for token in $values; do [ "$token" = "$username" ] && return 0; done
-    done < <(share_names)
-    return 1
-}
+locate_share_file(){ local wanted="$1" f; while IFS= read -r -d '' f; do if awk -v s="$wanted" 'function trim(x){gsub(/^[[:space:]]+|[[:space:]]+$/,"",x);return x}{if(tolower(trim($0))==tolower("[" s "]")){found=1;exit}}END{exit !found}' "$f" 2>/dev/null; then echo "$f"; return 0; fi; done < <(find /etc/samba -maxdepth 4 -type f \( -name 'smb.conf' -o -name '*.conf' -o -name '*.inc' \) ! -name '*.bak' ! -name '*.old' -print0 2>/dev/null); return 1; }
+set_share_parameter(){ local file="$1" share="$2" key="$3" value="$4" tmp; tmp=$(mktemp); awk -v share="$share" -v key="$key" -v value="$value" 'function trim(x){gsub(/^[[:space:]]+|[[:space:]]+$/,"",x);return x}function sec(x){return x~/^\[[^]]+\]$/}BEGIN{inside=0;done=0}{t=trim($0);if(sec(t)){if(inside&&!done){print "    " key " = " value;done=1}inside=(tolower(t)==tolower("["share"]"))}if(inside){eq=index($0,"=");if(eq>0){left=trim(substr($0,1,eq-1));if(tolower(left)==tolower(key)){print "    " key " = " value;done=1;next}}}print}END{if(inside&&!done)print "    " key " = " value}' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }; cat "$tmp" > "$file"; rm -f "$tmp"; }
 
 clear -x
 require_root
-check_dependencies testparm smbpasswd pdbedit getent useradd find awk
-[ -f "$smb_config" ] || exit 1
+for dep in testparm smbpasswd pdbedit getent useradd groupadd usermod chgrp chmod find awk; do command -v "$dep" >/dev/null || { echo "${red}Missing dependency: $dep${r}"; exit 1; }; done
+
 mapfile -t shares < <(share_names)
 center "ADD USER TO SAMBA SHARE"
 [ "${#shares[@]}" -gt 0 ] || { echo " No shares found."; exit 0; }
@@ -159,31 +32,61 @@ guest="$(share_param "$share" "guest ok")"; convert=no
 if [[ "${guest,,}" == yes ]]; then
     echo "${yellow}This share is PUBLIC; valid users will not restrict guest access.${r}"
     read -r -p "Convert it to PRIVATE while adding the user? [y/N]: " answer
-    yes_answer "$answer" || exit 0; convert=yes
+    yes_answer "$answer" || exit 0
+    convert=yes
 fi
+
 read -r -p "User to authorize: " user
 [ -n "$user" ] && ! [[ "$user" =~ [[:space:],] ]] || { echo "${red}Enter one username.${r}"; exit 1; }
+
 if ! getent passwd "$user" >/dev/null; then
-    read -r -p "Linux user '$user' does not exist. Create it? [y/N]: " answer; yes_answer "$answer" || exit 0
-    nologin_shell="$(command -v nologin 2>/dev/null || echo /usr/sbin/nologin)"; useradd -M -s "$nologin_shell" "$user" || exit 1
+    read -r -p "Linux user '$user' does not exist. Create it? [y/N]: " answer
+    yes_answer "$answer" || exit 0
+    nologin_shell="$(command -v nologin 2>/dev/null || echo /usr/sbin/nologin)"
+    useradd -M -s "$nologin_shell" "$user" || exit 1
 fi
 if ! pdbedit -L 2>/dev/null | cut -d: -f1 | grep -Fxq "$user"; then
-    read -r -p "Samba user '$user' does not exist. Create it and set password? [y/N]: " answer; yes_answer "$answer" || exit 0
+    read -r -p "Samba user '$user' does not exist. Create it and set password? [y/N]: " answer
+    yes_answer "$answer" || exit 0
     smbpasswd -a "$user" || exit 1
 fi
+
 current="$(share_param "$share" "valid users")"; current="${current//,/ }"
-if [ -z "$current" ] && [ "$convert" != yes ]; then
-    echo "${yellow}This private share currently has no explicit valid-users list; Samba may allow all authenticated users.${r}"
-    echo "Adding '$user' will make the authorization list explicit and restrict it to listed users."
-fi
 for token in $current; do [ "$token" = "$user" ] && { echo "${yellow}Already authorized.${r}"; exit 0; }; done
 new_users="$(printf '%s %s' "$current" "$user" | xargs)"
+
+share_path="$(share_param "$share" "path")"
+[ -d "$share_path" ] || { echo "${red}Share path does not exist: $share_path${r}"; exit 1; }
+samba_group="$(derive_share_group "$share")"
+getent group "$samba_group" >/dev/null || groupadd "$samba_group" || exit 1
+
+# Add every explicit username from the share to the filesystem group too.
+for token in $new_users; do
+    [[ "$token" == @* || "$token" == +* || "$token" == \&* ]] && continue
+    getent passwd "$token" >/dev/null && usermod -aG "$samba_group" "$token"
+done
+chgrp "$samba_group" "$share_path" || exit 1
+chmod 2770 "$share_path" || exit 1
+
 source_file="$(locate_share_file "$share")"; [ -n "$source_file" ] || { echo "${red}Could not locate share definition.${r}"; exit 1; }
 backup="${source_file}.minitools_backup_$(date +%Y%m%d_%H%M%S).bak"; cp -a "$source_file" "$backup" || exit 1
 set_share_parameter "$source_file" "$share" "valid users" "$new_users" || { cp -a "$backup" "$source_file"; exit 1; }
-[ "$convert" = yes ] && set_share_parameter "$source_file" "$share" "guest ok" "no"
+set_share_parameter "$source_file" "$share" "guest ok" "no" || { cp -a "$backup" "$source_file"; exit 1; }
+set_share_parameter "$source_file" "$share" "force group" "$samba_group" || { cp -a "$backup" "$source_file"; exit 1; }
+set_share_parameter "$source_file" "$share" "create mask" "0660" || { cp -a "$backup" "$source_file"; exit 1; }
+set_share_parameter "$source_file" "$share" "force create mode" "0660" || { cp -a "$backup" "$source_file"; exit 1; }
+set_share_parameter "$source_file" "$share" "directory mask" "0770" || { cp -a "$backup" "$source_file"; exit 1; }
+set_share_parameter "$source_file" "$share" "force directory mode" "0770" || { cp -a "$backup" "$source_file"; exit 1; }
+
 if ! testparm -s "$smb_config" >/dev/null 2>&1; then cp -a "$backup" "$source_file"; echo "${red}Validation failed; original restored.${r}"; exit 1; fi
 reload_samba || echo "${yellow}Config valid; automatic Samba reload failed.${r}"
+
 center "USER ADDED"
-printf " %-22s %s\n" "Share:" "$share"; printf " %-22s %s\n" "Added user:" "$user"; printf " %-22s %s\n" "Authorized users:" "$new_users"; printf " %-22s %s\n" "Config backup:" "$backup"
-center; echo
+printf " %-24s %s\n" "Share:" "$share"
+printf " %-24s %s\n" "Added user:" "$user"
+printf " %-24s %s\n" "Authorized users:" "$new_users"
+printf " %-24s %s\n" "Filesystem group:" "$samba_group"
+printf " %-24s %s\n" "Share root mode:" "2770"
+printf " %-24s %s\n" "Config backup:" "$backup"
+center
+echo

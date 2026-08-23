@@ -25,7 +25,7 @@ center() {
         iCount="${#i}"
         if [ $((iCount%2)) -eq 0 ]; then fill=""; else fill=" "; fi
         padding=$(( ( width - iCount - 2) / 2 ))
-        if [ "$padding" -lt 0 ]; then padding=0; fi
+        [ "$padding" -lt 0 ] && padding=0
         if [ "$padding" -gt 0 ]; then padding=$(printf '%0.s ' $(seq 1 "$padding")); else padding=""; fi
         echo "$padding" "$bold$i$r" "$padding""$fill"
     done
@@ -45,16 +45,15 @@ require_root() {
 check_dependencies() {
     if command -v minitools_dependencies_checker >/dev/null 2>&1; then
         minitools_dependencies_checker "$@"
-    else
-        local missing=0 dep
-        for dep in "$@"; do
-            if ! command -v "$dep" >/dev/null 2>&1; then
-                echo "${red}Missing dependency: $dep${r}"
-                missing=$((missing+1))
-            fi
-        done
-        [ "$missing" -eq 0 ] || exit 1
     fi
+    local dep missing=0
+    for dep in "$@"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            echo "${red}Missing dependency: $dep${r}"
+            missing=$((missing+1))
+        fi
+    done
+    [ "$missing" -eq 0 ] || exit 1
 }
 
 reload_samba() {
@@ -79,12 +78,6 @@ share_names() {
     }'
 }
 
-share_param() {
-    local share="$1"
-    local parameter="$2"
-    testparm -s --section-name="$share" --parameter-name="$parameter" "$smb_config" 2>/dev/null | tail -n 1
-}
-
 yes_answer() {
     case "${1,,}" in
         y|yes|s|si|sí) return 0 ;;
@@ -92,9 +85,26 @@ yes_answer() {
     esac
 }
 
+derive_share_group() {
+    local value
+    value="$(printf '%s' "$1" | tr '[:upper:] ' '[:lower:]_' | tr -cd 'a-z0-9_-')"
+    [ -n "$value" ] || value="share"
+    printf 'smb_%s\n' "${value:0:24}"
+}
+
+check_parent_traversal() {
+    local path="$1"
+    if command -v namei >/dev/null 2>&1; then
+        if namei -om "$path" 2>/dev/null | awk 'NR>1 && substr($1,10,1)!="x" && substr($1,7,1)!="x" && substr($1,4,1)!="x" {bad=1} END{exit !bad}'; then
+            echo "${yellow}NOTE: One or more parent directories may block traversal. If access is still denied, run:${r}"
+            echo "${yellow}      namei -l '$path'${r}"
+        fi
+    fi
+}
+
 clear -x
 require_root
-check_dependencies testparm smbpasswd pdbedit getent useradd groupadd usermod
+check_dependencies testparm smbpasswd pdbedit getent useradd groupadd usermod chgrp chmod find awk
 
 [ -f "$smb_config" ] || { echo "${red}Samba configuration not found: $smb_config${r}"; exit 1; }
 testparm -s "$smb_config" >/dev/null 2>&1 || { echo "${red}Current Samba configuration is invalid. Nothing changed.${r}"; exit 1; }
@@ -109,13 +119,16 @@ while IFS= read -r s; do [ "${s,,}" = "${share_name,,}" ] && { echo "${red}Share
 
 read -r -p "Mount point / folder to share (absolute path): " share_path
 [[ "$share_path" == /* ]] || { echo "${red}Path must be absolute.${r}"; exit 1; }
-created_path="no"
 if [ ! -d "$share_path" ]; then
     read -r -p "Path does not exist. Create it? [y/N]: " answer
     yes_answer "$answer" || { echo "Cancelled."; exit 0; }
     mkdir -p -- "$share_path" || exit 1
-    created_path="yes"
 fi
+share_path="$(readlink -f -- "$share_path")"
+
+mount_point="$(findmnt -T "$share_path" -n -o TARGET 2>/dev/null | head -n1)"
+mount_source="$(findmnt -T "$share_path" -n -o SOURCE 2>/dev/null | head -n1)"
+mount_fs="$(findmnt -T "$share_path" -n -o FSTYPE 2>/dev/null | head -n1)"
 
 echo
 echo "  1) Private - authorized Samba users only"
@@ -123,10 +136,14 @@ echo "  2) Public  - guest access allowed"
 read -r -p "Access type [1/2]: " access_choice
 
 authorized_users=()
+samba_group=""
+recursive_permissions="no"
+
 if [ "$access_choice" = "1" ]; then
     access_type="private"
     read -r -p "Authorized users (comma or space separated): " input
     input="${input//,/ }"
+
     for user in $input; do
         duplicate=no
         for u in "${authorized_users[@]}"; do [ "$u" = "$user" ] && duplicate=yes; done
@@ -149,31 +166,58 @@ if [ "$access_choice" = "1" ]; then
         fi
         authorized_users+=("$user")
     done
+
     [ "${#authorized_users[@]}" -gt 0 ] || { echo "${red}Private shares require at least one authorized user.${r}"; exit 1; }
 
-    safe_group="$(printf '%s' "$share_name" | tr '[:upper:] ' '[:lower:]_' | tr -cd 'a-z0-9_-')"
-    samba_group="smb_${safe_group:0:24}"
-    if [ "$created_path" = yes ]; then prompt="Apply recommended group permissions ($samba_group / 2770)? [Y/n]: "; default_yes=yes; else prompt="Existing path: apply group $samba_group and chmod 2770 to share root? [y/N]: "; default_yes=no; fi
-    read -r -p "$prompt" answer
-    apply=no
-    if [ "$default_yes" = yes ] && ! [[ "${answer,,}" =~ ^(n|no)$ ]]; then apply=yes; fi
-    yes_answer "$answer" && apply=yes
-    if [ "$apply" = yes ]; then
-        getent group "$samba_group" >/dev/null || groupadd "$samba_group" || exit 1
-        for user in "${authorized_users[@]}"; do usermod -aG "$samba_group" "$user"; done
-        chgrp "$samba_group" "$share_path" && chmod 2770 "$share_path" || echo "${yellow}Warning: filesystem permissions were not fully applied.${r}"
+    samba_group="$(derive_share_group "$share_name")"
+    getent group "$samba_group" >/dev/null || groupadd "$samba_group" || exit 1
+
+    for user in "${authorized_users[@]}"; do
+        usermod -aG "$samba_group" "$user" || { echo "${red}Failed to add '$user' to '$samba_group'.${r}"; exit 1; }
+    done
+
+    # IMPORTANT: Samba authentication is only half the permission model.
+    # Linux must also allow the authenticated users to traverse/write the shared path.
+    # 2770 = owner/group full access, no world access, plus setgid so new content inherits the share group.
+    chgrp "$samba_group" "$share_path" || exit 1
+    chmod 2770 "$share_path" || exit 1
+
+    if find "$share_path" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
+        echo
+        echo "${yellow}The share already contains files/directories.${r}"
+        echo "Root permissions are now correct, but older contents may have different group permissions."
+        read -r -p "Apply the Samba group and group read/write access to existing contents too? [y/N]: " answer
+        if yes_answer "$answer"; then
+            recursive_permissions="yes"
+            chgrp -R "$samba_group" "$share_path"
+            find "$share_path" -type d -exec chmod g+rwx,o-rwx,g+s {} +
+            find "$share_path" -type f -exec chmod g+rw,o-rwx {} +
+            chmod 2770 "$share_path"
+        fi
     fi
+
 elif [ "$access_choice" = "2" ]; then
     access_type="public"
-    if [ "$created_path" = yes ]; then
-        chmod 0777 "$share_path"
-    else
-        read -r -p "Make existing share root guest-writable with chmod 0777? [y/N]: " answer
-        yes_answer "$answer" && chmod 0777 "$share_path"
+
+    echo
+    echo "${yellow}PUBLIC means guest clients can write to this directory.${r}"
+    echo "The share root will therefore be made world-readable/writable/traversable (0777)."
+    chmod 0777 "$share_path" || exit 1
+
+    if find "$share_path" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
+        read -r -p "Also make existing contents writable by guest clients? [y/N]: " answer
+        if yes_answer "$answer"; then
+            recursive_permissions="yes"
+            find "$share_path" -type d -exec chmod a+rwx {} +
+            find "$share_path" -type f -exec chmod a+rw {} +
+        fi
     fi
 else
-    echo "${red}Invalid selection.${r}"; exit 1
+    echo "${red}Invalid selection.${r}"
+    exit 1
 fi
+
+check_parent_traversal "$share_path"
 
 read -r -p "Use this as an Apple Time Machine backup target? [y/N]: " answer
 if yes_answer "$answer"; then time_machine=yes; else time_machine=no; fi
@@ -186,11 +230,15 @@ fi
 tm_max=""
 if [ "$time_machine" = yes ]; then
     read -r -p "Optional Time Machine max size (example 500G, blank = unlimited): " tm_max
-    if [ -n "$tm_max" ] && ! [[ "$tm_max" =~ ^[0-9]+([KkMmGgTtPp])?$ ]]; then echo "${yellow}Invalid limit ignored.${r}"; tm_max=""; fi
+    if [ -n "$tm_max" ] && ! [[ "$tm_max" =~ ^[0-9]+([KkMmGgTtPp])?$ ]]; then
+        echo "${yellow}Invalid limit ignored.${r}"
+        tm_max=""
+    fi
 fi
 
 backup="${smb_config}.minitools_backup_$(date +%Y%m%d_%H%M%S).bak"
 cp -a "$smb_config" "$backup" || exit 1
+
 {
     echo
     echo "# BEGIN MINITOOLS SHARE: $share_name"
@@ -198,21 +246,29 @@ cp -a "$smb_config" "$backup" || exit 1
     echo "    path = $share_path"
     echo "    browseable = yes"
     echo "    read only = no"
+
     if [ "$access_type" = private ]; then
         echo "    guest ok = no"
         printf "    valid users ="; printf " %s" "${authorized_users[@]}"; echo
+        echo "    force group = $samba_group"
         echo "    create mask = 0660"
+        echo "    force create mode = 0660"
         echo "    directory mask = 0770"
+        echo "    force directory mode = 0770"
     else
         echo "    guest ok = yes"
         echo "    create mask = 0666"
+        echo "    force create mode = 0666"
         echo "    directory mask = 0777"
+        echo "    force directory mode = 0777"
     fi
+
     if [ "$time_machine" = yes ]; then
         echo "    vfs objects = fruit streams_xattr"
         echo "    fruit:time machine = yes"
         [ -n "$tm_max" ] && echo "    fruit:time machine max size = $tm_max"
     fi
+
     echo "# END MINITOOLS SHARE: $share_name"
 } >> "$smb_config"
 
@@ -221,15 +277,29 @@ if ! testparm -s "$smb_config" >/dev/null 2>&1; then
     echo "${red}New configuration failed validation; original restored.${r}"
     exit 1
 fi
+
 reload_samba || echo "${yellow}Config is valid, but Samba could not be reloaded automatically.${r}"
 
 center "SAMBA SHARE CREATED"
-printf " %-22s %s\n" "Share:" "$share_name"
-printf " %-22s %s\n" "Path:" "$share_path"
-printf " %-22s %s\n" "Access:" "${access_type^^}"
-[ "$access_type" = private ] && printf " %-22s %s\n" "Authorized users:" "${authorized_users[*]}"
-printf " %-22s %s\n" "Time Machine:" "${time_machine^^}"
-printf " %-22s %s\n" "Config backup:" "$backup"
-echo "${yellow}No files inside the shared directory were deleted or modified by the Samba config step.${r}"
+printf " %-24s %s\n" "Share:" "$share_name"
+printf " %-24s %s\n" "Path:" "$share_path"
+printf " %-24s %s\n" "Filesystem mount:" "${mount_point:-N/A}"
+printf " %-24s %s\n" "Filesystem source:" "${mount_source:-N/A}"
+printf " %-24s %s\n" "Filesystem type:" "${mount_fs:-N/A}"
+printf " %-24s %s\n" "Access:" "${access_type^^}"
+if [ "$access_type" = private ]; then
+    printf " %-24s %s\n" "Authorized users:" "${authorized_users[*]}"
+    printf " %-24s %s\n" "Share group:" "$samba_group"
+    printf " %-24s %s\n" "Root permissions:" "2770 (group controlled)"
+else
+    printf " %-24s %s\n" "Root permissions:" "0777 (public writable share)"
+fi
+printf " %-24s %s\n" "Existing contents fixed:" "${recursive_permissions^^}"
+printf " %-24s %s\n" "Time Machine:" "${time_machine^^}"
+printf " %-24s %s\n" "Config backup:" "$backup"
+echo
+if [ "$access_type" = private ]; then
+    echo "${green}Private share permissions are ready without chmod 777.${r}"
+fi
 center
 echo
