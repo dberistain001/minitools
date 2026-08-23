@@ -1,0 +1,57 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; gray="$(tput setaf 237 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="150"; bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+center(){ local text="$*"; local p=$(( (masterWidth-${#text})/2 )); [ "$p" -lt 0 ]&&p=0; echo; echo "$blue$bbar$r"; printf '%*s%s\n' "$p" '' "$bold$text$r"; echo "$blue$bbar$r"; }
+section(){ echo; echo "$yellow$bold$1$r"; echo "$blue$bbar$r"; }
+
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then
+    dependencies="ip ss awk sed"
+    minitools_dependencies_checker $dependencies
+fi
+
+routeLine=$(ip route show default 2>/dev/null | head -n1)
+gateway=$(echo "$routeLine" | awk '{for(i=1;i<=NF;i++) if($i=="via") print $(i+1)}')
+defaultIface=$(echo "$routeLine" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+publicIP="N/A"
+if command -v minitools_public_ip >/dev/null 2>&1; then publicIP=$(minitools_public_ip --quiet4 2>/dev/null | head -n1); elif command -v curl >/dev/null 2>&1; then publicIP=$(curl -4 -fsS --max-time 4 https://icanhazip.com 2>/dev/null | xargs); fi
+[ -z "$publicIP" ] && publicIP="N/A"
+
+center "MiniTools Network Report"
+section "Network Summary"
+printf '%-18s : %s\n' "Hostname" "$(hostname)"
+printf '%-18s : %s\n' "Default Interface" "${defaultIface:-N/A}"
+printf '%-18s : %s\n' "Gateway" "${gateway:-N/A}"
+printf '%-18s : %s\n' "Public IPv4" "$publicIP"
+printf '%-18s : %s\n' "DNS Servers" "$(awk '/^nameserver/ {printf "%s ",$2}' /etc/resolv.conf 2>/dev/null | xargs)"
+printf '%-18s : %s\n' "Listening Ports" "$(ss -H -lntu 2>/dev/null | wc -l | xargs)"
+
+section "Interfaces"
+printf ' %-18s | %-10s | %-18s | %-8s | %-12s | %-36s | %-42s\n' "Interface" "State" "MAC Address" "MTU" "Speed" "IPv4" "IPv6"
+echo "$blue$bbar$r"
+while read -r iface; do
+    [ -z "$iface" ] && continue
+    state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo unknown)
+    mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo N/A)
+    mtu=$(cat "/sys/class/net/$iface/mtu" 2>/dev/null || echo N/A)
+    speed=$(cat "/sys/class/net/$iface/speed" 2>/dev/null || true)
+    if [[ "$speed" =~ ^[0-9]+$ ]]; then speed="${speed}Mb/s"; else speed="-"; fi
+    ipv4=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4}' | paste -sd',' -)
+    ipv6=$(ip -o -6 addr show dev "$iface" scope global 2>/dev/null | awk '{print $4}' | paste -sd',' -)
+    [ -z "$ipv4" ] && ipv4="-"; [ -z "$ipv6" ] && ipv6="-"
+    printf ' %-18.18s | %-10s | %-18s | %-8s | %-12s | %-36.36s | %-42.42s\n' "$iface" "$state" "$mac" "$mtu" "$speed" "$ipv4" "$ipv6"
+done < <(find /sys/class/net -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | sort)
+
+section "IPv4 Routes"
+ip -4 route 2>/dev/null
+
+section "IPv6 Routes"
+ip -6 route 2>/dev/null | head -n 25
+
+if command -v resolvectl >/dev/null 2>&1; then
+    section "Resolver Status"
+    resolvectl status 2>/dev/null | sed -n '1,45p'
+fi
+
+echo "$blue$bbar$r"; echo

@@ -1,0 +1,72 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="125"; bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+center(){ local text="$*"; local p=$(( (masterWidth-${#text})/2 )); [ "$p" -lt 0 ]&&p=0; echo; echo "$blue$bbar$r"; printf '%*s%s\n' "$p" '' "$bold$text$r"; echo "$blue$bbar$r"; }
+
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then minitools_dependencies_checker ip awk getent; fi
+if ! command -v ip >/dev/null 2>&1; then echo "${red}iproute2 is required.${r}"; exit 1; fi
+
+defaultRoute=$(ip route show default 2>/dev/null | head -n1)
+iface=$(echo "$defaultRoute" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+[ -z "$iface" ] && { echo "${red}No default LAN interface found.${r}"; exit 1; }
+cidr=$(ip -o -4 addr show dev "$iface" scope global 2>/dev/null | awk 'NR==1 {print $4}')
+[ -z "$cidr" ] && { echo "${red}No IPv4 subnet found on $iface.${r}"; exit 1; }
+prefix=${cidr#*/}
+
+center "MiniTools LAN Devices"
+echo "${bold}Interface:${r} $iface"
+echo "${bold}Network  :${r} $cidr"
+
+scanMethod="Neighbor cache only"
+arpTmp=$(mktemp)
+trap 'rm -f "$arpTmp"' EXIT
+
+if command -v arp-scan >/dev/null 2>&1 && [ "$EUID" -eq 0 ]; then
+    scanMethod="arp-scan"
+    arp-scan --interface="$iface" --localnet 2>/dev/null | awk '/^[0-9]+\./ {ip=$1; mac=$2; $1=$2=""; sub(/^  */,""); print ip"|"mac"|"$0}' > "$arpTmp"
+elif command -v nmap >/dev/null 2>&1; then
+    if [ "$prefix" -ge 22 ] 2>/dev/null; then
+        scanMethod="nmap ping scan"
+        nmap -sn -n "$cidr" >/dev/null 2>&1
+    else
+        echo "${yellow}Subnet is larger than /22; skipping automatic nmap sweep to avoid a very large scan.${r}"
+    fi
+else
+    echo "${yellow}For fuller discovery install arp-scan or nmap. Showing devices already present in the neighbor table.${r}"
+fi
+
+echo "${bold}Discovery :${r} $scanMethod"
+echo
+echo "$blue$bbar$r"
+printf ' %-16s | %-19s | %-13s | %-32s | %-34s\n' "IP Address" "MAC Address" "State" "Hostname" "Vendor"
+echo "$blue$bbar$r"
+
+count=0
+if [ -s "$arpTmp" ]; then
+    while IFS='|' read -r ipaddr mac vendor; do
+        hostname=$(getent hosts "$ipaddr" 2>/dev/null | awk 'NR==1 {print $2}')
+        [ -z "$hostname" ] && hostname="-"
+        state=$(ip neigh show "$ipaddr" dev "$iface" 2>/dev/null | awk '{print $NF}')
+        [ -z "$state" ] && state="REACHABLE"
+        count=$((count+1))
+        printf ' %-16s | %-19s | %-13s | %-32.32s | %-34.34s\n' "$ipaddr" "$mac" "$state" "$hostname" "${vendor:--}"
+    done < <(sort -t'|' -k1,1V "$arpTmp")
+else
+    while read -r ipaddr devword devname lladdrword mac state; do
+        [[ "$ipaddr" == *:* ]] && continue
+        [ -z "$ipaddr" ] && continue
+        [ "$devname" != "$iface" ] && continue
+        [ "$lladdrword" != "lladdr" ] && mac="-"
+        hostname=$(getent hosts "$ipaddr" 2>/dev/null | awk 'NR==1 {print $2}')
+        [ -z "$hostname" ] && hostname="-"
+        vendor="-"
+        count=$((count+1))
+        printf ' %-16s | %-19s | %-13s | %-32.32s | %-34s\n' "$ipaddr" "$mac" "${state:--}" "$hostname" "$vendor"
+    done < <(ip neigh show dev "$iface" 2>/dev/null | sort -V)
+fi
+
+echo "$blue$bbar$r"
+echo "${bold}Devices found:${r} $count"
+echo

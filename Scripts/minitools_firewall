@@ -1,0 +1,94 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="120"; bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+center(){ local text="$*"; local p=$(( (masterWidth-${#text})/2 )); [ "$p" -lt 0 ]&&p=0; echo; echo "$blue$bbar$r"; printf '%*s%s\n' "$p" '' "$bold$text$r"; echo "$blue$bbar$r"; }
+section(){ echo; echo "$yellow$bold$1$r"; echo "$blue$bbar$r"; }
+
+center "MiniTools Firewall Report"
+if [ "$EUID" -ne 0 ]; then echo "${yellow}Note:${r} Run as root for the complete firewall ruleset."; fi
+
+ufwInstalled="No"; ufwStatus="Not installed"
+if command -v ufw >/dev/null 2>&1; then
+    ufwInstalled="Yes"
+    ufwStatus=$(ufw status 2>/dev/null | awk -F: '/^Status:/ {gsub(/^[ \t]+/,"",$2); print $2}')
+    [ -z "$ufwStatus" ] && ufwStatus="Unknown / permission denied"
+fi
+
+firewalldInstalled="No"; firewalldStatus="Not installed"
+if command -v firewall-cmd >/dev/null 2>&1; then
+    firewalldInstalled="Yes"
+    if firewall-cmd --state >/dev/null 2>&1; then firewalldStatus="running"; else firewalldStatus="not running"; fi
+fi
+
+nftInstalled="No"; nftStatus="Not installed"
+if command -v nft >/dev/null 2>&1; then
+    nftInstalled="Yes"
+    nftRules=$(nft list ruleset 2>/dev/null)
+    if [ -n "$nftRules" ]; then nftStatus="rules present"; else nftStatus="no readable rules"; fi
+fi
+
+iptablesInstalled="No"; iptablesStatus="Not installed"
+if command -v iptables >/dev/null 2>&1; then
+    iptablesInstalled="Yes"
+    iptRules=$(iptables -S 2>/dev/null)
+    if [ -n "$iptRules" ]; then iptablesStatus="rules readable"; else iptablesStatus="no readable rules"; fi
+fi
+
+section "Firewall Backends"
+printf ' %-20s | %-12s | %-35s\n' "Backend" "Installed" "Status"
+echo "$blue$bbar$r"
+printf ' %-20s | %-12s | %-35s\n' "UFW" "$ufwInstalled" "$ufwStatus"
+printf ' %-20s | %-12s | %-35s\n' "firewalld" "$firewalldInstalled" "$firewalldStatus"
+printf ' %-20s | %-12s | %-35s\n' "nftables" "$nftInstalled" "$nftStatus"
+printf ' %-20s | %-12s | %-35s\n' "iptables" "$iptablesInstalled" "$iptablesStatus"
+
+if [ "$ufwInstalled" = "Yes" ]; then
+    section "UFW Rules"
+    ufw status numbered 2>/dev/null || echo "Unable to read UFW rules."
+fi
+
+if [ "$firewalldInstalled" = "Yes" ] && [ "$firewalldStatus" = "running" ]; then
+    section "firewalld Active Zones"
+    firewall-cmd --get-active-zones 2>/dev/null
+    while read -r zone; do
+        [ -z "$zone" ] && continue
+        echo
+        echo "$bold Zone: $zone$r"
+        firewall-cmd --zone="$zone" --list-all 2>/dev/null
+    done < <(firewall-cmd --get-active-zones 2>/dev/null | awk '!/^  / {print $1}')
+fi
+
+if [ "$nftInstalled" = "Yes" ] && [ -n "$nftRules" ]; then
+    section "nftables Summary"
+    if [ "$1" = "--full" ]; then
+        printf '%s\n' "$nftRules"
+    else
+        printf '%s\n' "$nftRules" | awk '
+            /^[[:space:]]*table / ||
+            /^[[:space:]]*chain / ||
+            /hook (input|forward|output)/ ||
+            /policy (accept|drop|reject)/ ||
+            / dport / || / sport / || / ct state / {print}' | sed '/^[[:space:]]*$/d'
+        echo
+        echo "Use ${bold}minitools_firewall --full${r} to print the complete nftables ruleset."
+    fi
+elif [ "$iptablesInstalled" = "Yes" ] && [ -n "$iptRules" ]; then
+    section "iptables Rules"
+    if [ "$1" = "--full" ]; then
+        printf '%s\n' "$iptRules"
+    else
+        printf '%s\n' "$iptRules" | head -n 80
+        lines=$(printf '%s\n' "$iptRules" | wc -l)
+        [ "$lines" -gt 80 ] && echo "... $((lines-80)) additional rules hidden. Use --full."
+    fi
+fi
+
+section "Forwarding"
+ipv4Forward=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo N/A)
+ipv6Forward=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo N/A)
+printf '%-22s : %s\n' "IPv4 forwarding" "$ipv4Forward"
+printf '%-22s : %s\n' "IPv6 forwarding" "$ipv6Forward"
+
+echo "$blue$bbar$r"; echo

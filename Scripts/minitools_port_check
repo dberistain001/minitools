@@ -1,0 +1,49 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="135"; bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+center(){ local text="$*"; local p=$(( (masterWidth-${#text})/2 )); [ "$p" -lt 0 ]&&p=0; echo; echo "$blue$bbar$r"; printf '%*s%s\n' "$p" '' "$bold$text$r"; echo "$blue$bbar$r"; }
+
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then minitools_dependencies_checker ss awk sed; fi
+if ! command -v ss >/dev/null 2>&1; then echo "${red}ss is required (iproute2).${r}"; exit 1; fi
+
+filterPort="$1"
+if [ -n "$filterPort" ] && ! [[ "$filterPort" =~ ^[0-9]+$ ]] ; then
+    echo "Usage: minitools_port_check [port]"
+    echo "Example: minitools_port_check 443"
+    exit 1
+fi
+
+center "MiniTools Listening Port Check"
+if [ -n "$filterPort" ]; then echo "${bold}Filtering port:${r} $filterPort"; fi
+if [ "$EUID" -ne 0 ]; then echo "${yellow}Note:${r} Run as root to see all owning processes."; fi
+echo
+echo "$blue$bbar$r"
+printf ' %-8s | %-11s | %-38s | %-38s | %-30s\n' "Protocol" "State" "Local Address:Port" "Peer Address:Port" "Process"
+echo "$blue$bbar$r"
+
+count=0
+while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    proto=$(awk '{print $1}' <<< "$line")
+    state=$(awk '{print $2}' <<< "$line")
+    localAddr=$(awk '{print $5}' <<< "$line")
+    peerAddr=$(awk '{print $6}' <<< "$line")
+    process=$(awk '{$1=$2=$3=$4=$5=$6=""; sub(/^ +/,""); print}' <<< "$line")
+    [ -z "$process" ] && process="-"
+    if [ -n "$filterPort" ]; then
+        portPart="${localAddr##*:}"
+        portPart="${portPart%]}"
+        [ "$portPart" != "$filterPort" ] && continue
+    fi
+    count=$((count+1))
+    printf ' %-8.8s | %-11.11s | %-38.38s | %-38.38s | %-30.30s\n' "$proto" "$state" "$localAddr" "$peerAddr" "$process"
+done < <(ss -H -lntup 2>/dev/null)
+
+echo "$blue$bbar$r"
+echo "${bold}Listening sockets found:${r} $count"
+if [ -n "$filterPort" ]; then
+    if [ "$count" -gt 0 ]; then echo "${green}Port $filterPort is listening locally.${r}"; else echo "${yellow}Port $filterPort is not listening locally.${r}"; fi
+fi
+echo

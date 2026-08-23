@@ -1,0 +1,58 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="105"; bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+center(){ local text="$*"; local p=$(( (masterWidth-${#text})/2 )); [ "$p" -lt 0 ]&&p=0; echo; echo "$blue$bbar$r"; printf '%*s%s\n' "$p" '' "$bold$text$r"; echo "$blue$bbar$r"; }
+
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then minitools_dependencies_checker ip getent awk; fi
+if ! command -v ip >/dev/null 2>&1; then echo "${red}iproute2 is required.${r}"; exit 1; fi
+
+target="$1"
+if [ -z "$target" ]; then
+    center "MiniTools Route Table"
+    echo "$yellow$bold IPv4 Routes$r"
+    echo "$blue$bbar$r"
+    ip -4 route
+    echo
+    echo "$yellow$bold IPv6 Routes$r"
+    echo "$blue$bbar$r"
+    ip -6 route
+    echo
+    echo "$yellow$bold Policy Rules$r"
+    echo "$blue$bbar$r"
+    ip rule 2>/dev/null
+    echo "$blue$bbar$r"; echo
+    echo "Usage for a specific destination: minitools_route <IP-or-hostname>"
+    exit 0
+fi
+
+resolved="$target"
+if ! [[ "$target" =~ ^[0-9a-fA-F:.]+$ ]]; then
+    resolved=$(getent ahosts "$target" 2>/dev/null | awk 'NR==1 {print $1}')
+fi
+[ -z "$resolved" ] && { echo "${red}Could not resolve $target.${r}"; exit 1; }
+
+if [[ "$resolved" == *:* ]]; then
+    routeOut=$(ip -6 route get "$resolved" 2>/dev/null | head -n1)
+else
+    routeOut=$(ip -4 route get "$resolved" 2>/dev/null | head -n1)
+fi
+[ -z "$routeOut" ] && { echo "${red}No route to $target ($resolved).${r}"; exit 1; }
+
+iface=$(echo "$routeOut" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+src=$(echo "$routeOut" | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+gateway=$(echo "$routeOut" | awk '{for(i=1;i<=NF;i++) if($i=="via") print $(i+1)}')
+[ -z "$gateway" ] && gateway="Direct / on-link"
+
+center "MiniTools Route Lookup"
+printf '%-20s : %s\n' "Requested Target" "$target"
+printf '%-20s : %s\n' "Resolved Address" "$resolved"
+printf '%-20s : %s\n' "Interface" "${iface:-N/A}"
+printf '%-20s : %s\n' "Source Address" "${src:-N/A}"
+printf '%-20s : %s\n' "Gateway" "$gateway"
+echo
+echo "$yellow$bold Kernel Route Decision$r"
+echo "$blue$bbar$r"
+echo "$routeOut"
+echo "$blue$bbar$r"; echo

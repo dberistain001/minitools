@@ -1,0 +1,40 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="80"; bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+center(){ local text="$*"; local p=$(( (masterWidth-${#text})/2 )); [ "$p" -lt 0 ]&&p=0; echo; echo "$blue$bbar$r"; printf '%*s%s\n' "$p" '' "$bold$text$r"; echo "$blue$bbar$r"; }
+
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then minitools_dependencies_checker curl ip; fi
+if ! command -v curl >/dev/null 2>&1; then echo "${red}curl is required.${r}"; exit 1; fi
+
+get_ip(){
+    local family="$1"; shift
+    local url result
+    for url in "$@"; do
+        result=$(curl "$family" -fsS --max-time 4 "$url" 2>/dev/null | tr -d '\r\n ')
+        if [ -n "$result" ]; then echo "$result"; return 0; fi
+    done
+    return 1
+}
+
+ipv4=$(get_ip -4 https://icanhazip.com https://api.ipify.org https://ifconfig.me/ip)
+ipv6=$(get_ip -6 https://icanhazip.com https://api64.ipify.org https://ifconfig.me/ip)
+
+case "$1" in
+    --quiet|--quiet4|-4) [ -n "$ipv4" ] && echo "$ipv4" || exit 1; exit 0 ;;
+    --quiet6|-6) [ -n "$ipv6" ] && echo "$ipv6" || exit 1; exit 0 ;;
+esac
+
+routeLine=$(ip route show default 2>/dev/null | head -n1)
+iface=$(echo "$routeLine" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+gateway=$(echo "$routeLine" | awk '{for(i=1;i<=NF;i++) if($i=="via") print $(i+1)}')
+localIP=$(ip -o -4 addr show dev "$iface" scope global 2>/dev/null | awk 'NR==1 {split($4,a,"/");print a[1]}')
+
+center "MiniTools Public IP"
+printf '%-20s : %s\n' "Public IPv4" "${ipv4:-Unavailable}"
+printf '%-20s : %s\n' "Public IPv6" "${ipv6:-Unavailable}"
+printf '%-20s : %s\n' "Local IPv4" "${localIP:-N/A}"
+printf '%-20s : %s\n' "Default Interface" "${iface:-N/A}"
+printf '%-20s : %s\n' "Gateway" "${gateway:-N/A}"
+echo "$blue$bbar$r"; echo

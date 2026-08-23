@@ -1,0 +1,135 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+#Defining some colors =========================
+red="$(tput setaf 196 2>/dev/null || true)";
+yellow="$(tput setaf 226 2>/dev/null || true)";
+blue="$(tput setaf 69 2>/dev/null || true)";
+green="$(tput setaf 118 2>/dev/null || true)";
+gray="$(tput setaf 237 2>/dev/null || true)";
+bold="$(tput bold 2>/dev/null || true)";
+r="$(tput sgr0 2>/dev/null || true)";
+#Defining some colors [END] ===================
+
+masterWidth="100";
+bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+
+center() {
+    local text="$*"
+    local padding=$(( (masterWidth - ${#text}) / 2 ))
+    [ "$padding" -lt 0 ] && padding=0
+    echo; echo "$blue$bbar$r"
+    printf '%*s%s\n' "$padding" '' "$bold$text$r"
+    echo "$blue$bbar$r"
+}
+
+section() {
+    echo
+    echo "$yellow$bold$1$r"
+    echo "$blue$bbar$r"
+}
+
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then
+    dependencies="hostname uname uptime lscpu free df ip awk sed"
+    minitools_dependencies_checker $dependencies
+fi
+
+osName="Unknown"
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    osName="${PRETTY_NAME:-$NAME}"
+fi
+
+manufacturer=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null | xargs)
+model=$(cat /sys/class/dmi/id/product_name 2>/dev/null | xargs)
+[ -z "$manufacturer$model" ] && manufacturer="N/A"
+
+cpuModel=$(lscpu 2>/dev/null | awk -F: '/Model name/ {gsub(/^[ \t]+/,"",$2); print $2; exit}')
+cpuSockets=$(lscpu 2>/dev/null | awk -F: '/Socket\(s\)/ {gsub(/ /,"",$2); print $2; exit}')
+cpuCores=$(lscpu 2>/dev/null | awk -F: '/Core\(s\) per socket/ {gsub(/ /,"",$2); print $2; exit}')
+cpuThreads=$(nproc 2>/dev/null || echo N/A)
+
+memTotal=$(free -h | awk '/^Mem:/ {print $2}')
+memUsed=$(free -h | awk '/^Mem:/ {print $3}')
+memAvail=$(free -h | awk '/^Mem:/ {print $7}')
+memPct=$(free -b | awk '/^Mem:/ {if ($2>0) printf "%.1f%%", ($3/$2)*100; else print "N/A"}')
+
+rootInfo=$(df -hP / | awk 'NR==2 {print $3" used / "$2" total ("$5")"}')
+loadAvg=$(awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null)
+defaultRoute=$(ip route show default 2>/dev/null | head -n1)
+defaultGateway=$(printf '%s\n' "$defaultRoute" | awk '{for(i=1;i<=NF;i++) if($i=="via") print $(i+1)}')
+defaultIface=$(printf '%s\n' "$defaultRoute" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+localIP=$(ip -o -4 addr show dev "$defaultIface" scope global 2>/dev/null | awk 'NR==1 {split($4,a,"/"); print a[1]}')
+virtualization=$(systemd-detect-virt 2>/dev/null || true)
+[ -z "$virtualization" ] && virtualization="none detected"
+
+publicIP="N/A"
+if command -v minitools_public_ip >/dev/null 2>&1; then
+    publicIP=$(minitools_public_ip --quiet4 2>/dev/null | head -n1)
+elif command -v curl >/dev/null 2>&1; then
+    publicIP=$(curl -4 -fsS --max-time 4 https://icanhazip.com 2>/dev/null | xargs)
+fi
+[ -z "$publicIP" ] && publicIP="N/A"
+
+center "MiniTools System Report"
+
+section "System Information"
+printf '%-18s : %s\n' "Hostname" "$(hostname)"
+printf '%-18s : %s\n' "Operating System" "$osName"
+printf '%-18s : %s\n' "Kernel" "$(uname -r)"
+printf '%-18s : %s\n' "Architecture" "$(uname -m)"
+printf '%-18s : %s\n' "Hardware" "$manufacturer $model"
+printf '%-18s : %s\n' "Virtualization" "$virtualization"
+printf '%-18s : %s\n' "Uptime" "$(uptime -p 2>/dev/null | sed 's/^up //')"
+printf '%-18s : %s\n' "Load Average" "$loadAvg"
+
+section "CPU and Memory"
+printf '%-18s : %s\n' "CPU" "$cpuModel"
+printf '%-18s : %s\n' "CPU Layout" "$cpuSockets socket(s) | $cpuCores core(s)/socket | $cpuThreads thread(s)"
+printf '%-18s : %s\n' "Memory" "$memUsed used / $memTotal total | $memAvail available | $memPct used"
+
+section "Storage"
+printf '%-18s : %s\n' "Root Filesystem" "$rootInfo"
+if command -v zpool >/dev/null 2>&1; then
+    zpool list -H -o name,size,alloc,free,health 2>/dev/null | while IFS=$'\t' read -r name size alloc free health; do
+        printf '%-18s : %s | size %s | used %s | free %s | %s\n' "ZFS Pool" "$name" "$size" "$alloc" "$free" "$health"
+    done
+fi
+
+section "Network"
+printf '%-18s : %s\n' "Default Interface" "${defaultIface:-N/A}"
+printf '%-18s : %s\n' "Gateway" "${defaultGateway:-N/A}"
+printf '%-18s : %s\n' "Local IPv4" "${localIP:-N/A}"
+printf '%-18s : %s\n' "Public IPv4" "$publicIP"
+printf '%-18s : %s\n' "DNS" "$(awk '/^nameserver/ {printf "%s ",$2}' /etc/resolv.conf 2>/dev/null | xargs)"
+
+section "Services"
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    printf '%-18s : %s\n' "Docker" "$(docker ps -q | wc -l | xargs) running / $(docker ps -aq | wc -l | xargs) total containers"
+else
+    printf '%-18s : %s\n' "Docker" "Not running or not installed"
+fi
+
+if command -v virsh >/dev/null 2>&1; then
+    qemuVMs=$(virsh -c qemu:///system list --state-running --name 2>/dev/null | sed '/^$/d' | wc -l | xargs)
+    printf '%-18s : %s\n' "QEMU/KVM" "${qemuVMs:-0} running VM(s)"
+else
+    printf '%-18s : %s\n' "QEMU/KVM" "virsh not installed"
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    failedUnits=$(systemctl --failed --no-legend 2>/dev/null | sed '/^$/d' | wc -l | xargs)
+    if [ "${failedUnits:-0}" -eq 0 ]; then
+        printf '%-18s : %b\n' "Failed Services" "${green}0$r"
+    else
+        printf '%-18s : %b\n' "Failed Services" "${red}${failedUnits}$r"
+    fi
+fi
+
+if command -v sensors >/dev/null 2>&1; then
+    temp=$(sensors 2>/dev/null | awk '/Package id 0:|Tctl:|CPU:/ {print $0; exit}' | xargs)
+    [ -n "$temp" ] && printf '%-18s : %s\n' "CPU Temperature" "$temp"
+fi
+
+echo "$blue$bbar$r"
+echo

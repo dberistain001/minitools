@@ -1,0 +1,54 @@
+#!/usr/bin/bash
+#writen by dberistain
+
+red="$(tput setaf 196 2>/dev/null || true)"; yellow="$(tput setaf 226 2>/dev/null || true)"; blue="$(tput setaf 69 2>/dev/null || true)"; green="$(tput setaf 118 2>/dev/null || true)"; gray="$(tput setaf 237 2>/dev/null || true)"; bold="$(tput bold 2>/dev/null || true)"; r="$(tput sgr0 2>/dev/null || true)";
+masterWidth="150"; bbar=$(printf '%0.s—' $(seq 1 "$masterWidth"));
+
+center(){ local text="$*"; local p=$(( (masterWidth-${#text})/2 )); [ "$p" -lt 0 ]&&p=0; echo; echo "$blue$bbar$r"; printf '%*s%s\n' "$p" '' "$bold$text$r"; echo "$blue$bbar$r"; }
+section(){ echo; echo "$yellow$bold$1$r"; echo "$blue$bbar$r"; }
+
+if command -v minitools_dependencies_checker >/dev/null 2>&1; then
+    dependencies="lsblk df awk sed"
+    minitools_dependencies_checker $dependencies
+fi
+
+center "MiniTools Disk Report"
+section "Physical Disks"
+printf ' %-12s | %-10s | %-8s | %-10s | %-32s | %-24s | %-12s | %-12s\n' "Device" "Size" "Type" "Transport" "Model" "Serial" "Health" "Temp"
+echo "$blue$bbar$r"
+
+while IFS= read -r diskLine; do
+    name=$(printf '%s\n' "$diskLine" | sed -n 's/.*NAME="\([^"]*\)".*/\1/p')
+    size=$(printf '%s\n' "$diskLine" | sed -n 's/.*SIZE="\([^"]*\)".*/\1/p')
+    type=$(printf '%s\n' "$diskLine" | sed -n 's/.*TYPE="\([^"]*\)".*/\1/p')
+    tran=$(printf '%s\n' "$diskLine" | sed -n 's/.*TRAN="\([^"]*\)".*/\1/p')
+    model=$(printf '%s\n' "$diskLine" | sed -n 's/.*MODEL="\([^"]*\)".*/\1/p')
+    serial=$(printf '%s\n' "$diskLine" | sed -n 's/.*SERIAL="\([^"]*\)".*/\1/p')
+    [ "$type" != "disk" ] && continue
+    health="N/A"; temp="N/A"
+    if command -v smartctl >/dev/null 2>&1; then
+        smartOut=$(smartctl -H -A "/dev/$name" 2>/dev/null)
+        if [ -n "$smartOut" ]; then
+            health=$(printf '%s\n' "$smartOut" | awk -F: '/SMART overall-health self-assessment test result|SMART Health Status/ {gsub(/^[ \t]+/,"",$2); print $2; exit}')
+            [ -z "$health" ] && health="Available"
+            temp=$(printf '%s\n' "$smartOut" | awk '/Temperature_Celsius|Temperature_Internal|Current Drive Temperature/ {for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/) v=$i; if(v!="") {print v"C"; exit}}')
+            [ -z "$temp" ] && temp="N/A"
+        fi
+    fi
+    printf ' %-12s | %-10s | %-8s | %-10s | %-32.32s | %-24.24s | %-12.12s | %-12s\n' "/dev/$name" "$size" "$type" "${tran:--}" "${model:--}" "${serial:--}" "$health" "$temp"
+done < <(lsblk -dnP -o NAME,SIZE,TYPE,TRAN,MODEL,SERIAL 2>/dev/null)
+
+section "Partitions and Filesystems"
+lsblk -o NAME,FSTYPE,SIZE,FSUSED,FSAVAIL,FSUSE%,MOUNTPOINTS 2>/dev/null || lsblk -f
+
+section "Mounted Filesystem Usage"
+df -hT -x tmpfs -x devtmpfs -x overlay 2>/dev/null
+
+if command -v zpool >/dev/null 2>&1; then
+    section "ZFS Pools"
+    zpool list 2>/dev/null
+    echo
+    zpool status -x 2>/dev/null
+fi
+
+echo "$blue$bbar$r"; echo
