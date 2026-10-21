@@ -36,7 +36,7 @@ fail() {
 decode_findmnt() {
     local value="$1"
     value="${value//\\x20/ }"
-    value="${value//\\x09/}"
+    value="${value//\\x09/$'\t'}"
     printf '%s' "$value"
 }
 
